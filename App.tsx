@@ -7,11 +7,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import AuthGate from './AuthGate';
+import TradeComposer, { type TradeDraft } from './TradeComposer';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 type Screen = 'home' | 'community' | 'chats' | 'my' | 'detail' | 'chat' |
   'profile' | 'security' | 'notifications' | 'settings' | 'posts' | 'comments' |
-  'history' | 'notices' | 'guide' | 'help' | 'empty';
+  'history' | 'notices' | 'guide' | 'help' | 'empty' | 'trade-compose' | 'trade-edit';
 type Group = '티켓' | '굿즈' | '카풀' | '직관메이트';
 
 const blue = '#075cf1';
@@ -41,7 +42,7 @@ const categories: { name: Group; icon: IconName }[] = [
   { name: '티켓', icon: 'ticket' }, { name: '굿즈', icon: 'bag-handle' },
   { name: '카풀', icon: 'car-sport' }, { name: '직관메이트', icon: 'people' },
 ];
-type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number };
+type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string } };
 const samplePosts: Post[] = [
   { id: 1, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 vs 키움 히어로즈 (11/8 토)', summary: '3루 내야지정석 13블록 8열 12, 13번 (연석 2매)\n정가 26,000원/매 (총 52,000원)', image: images.stadium, likes: 24, replies: 7 },
   { id: 2, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 vs SSG 랜더스 (11/9 일)', summary: '1루 내야지정석 5블록 10열 5번 (1매)\n정가 28,000원', image: images.stadium, likes: 18, replies: 4 },
@@ -141,6 +142,9 @@ function FanLink({ logout }: { logout: () => void }) {
   const [noticeFilter, setNoticeFilter] = useState('전체');
   const [historyFilter, setHistoryFilter] = useState('전체');
   const [post, setPost] = useState(samplePosts[0]);
+  const [tradePosts, setTradePosts] = useState<Post[]>([]);
+  const nextPostId = React.useRef(samplePosts.length + 1);
+  const posts = [...tradePosts, ...samplePosts];
   const [chat, setChat] = useState('라팍티켓');
   const [readRooms, setReadRooms] = useState<string[]>([]);
   const [saved, setSaved] = useState<number[]>([]);
@@ -162,6 +166,46 @@ function FanLink({ logout }: { logout: () => void }) {
   const [nickname, setNickname] = useState('라팍직관러');
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const publishTrade = ({ group, club, title, body, price, imageUri, referencePrice }: TradeDraft) => {
+    const existing = screen === 'trade-edit' && post.trade ? post : undefined;
+    const savedPost: Post = {
+      id: existing?.id ?? nextPostId.current++, group, club, title, summary: body,
+      image: { uri: imageUri }, likes: existing?.likes ?? 0, replies: existing?.replies ?? 0,
+      trade: { price, referencePrice, imageUri, author: existing?.trade?.author ?? nickname },
+    };
+    if (existing) {
+      setTradePosts(old => old.map(item => item.id === savedPost.id ? savedPost : item));
+      setPost(savedPost);
+    } else {
+      setTradePosts(old => [savedPost, ...old]);
+    }
+    setGroup(group);
+    setClub(club);
+    setActivityFilter('전체');
+    back();
+  };
+
+  const deleteTrade = () => {
+    if (!post.trade) return;
+    const id = post.id;
+    Alert.alert('거래 글 삭제', '이 글을 삭제할까요?', [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: () => {
+        setTradePosts(old => old.filter(item => item.id !== id));
+        setSaved(old => old.filter(item => item !== id));
+        setLiked(old => old.filter(item => item !== id));
+        setViewed(old => old.filter(item => item !== id));
+        setComments(old => {
+          const next = { ...old };
+          delete next[id];
+          return next;
+        });
+        setDraft('');
+        back();
+      } },
+    ]);
+  };
+
   const openPost = (p: Post) => {
     setPost(p);
     setViewed(old => [p.id, ...old.filter(id => id !== p.id)]);
@@ -193,14 +237,16 @@ function FanLink({ logout }: { logout: () => void }) {
   function postCard(item: Post, compact = false) {
     return <View key={item.id} style={s.card}>
       <Pressable onPress={() => openPost(item)} style={compact ? s.inline : undefined}>
-        {compact ? <Image source={item.image} style={s.thumb} /> : <View style={s.inline}>
-          <Avatar source={clubs[item.club].logo} size={33} /><View><Text style={s.rowTitle}>라팍티켓  <Text style={s.link}>{clubs[item.club].name}</Text></Text><Text style={s.tiny}>23분 전</Text></View>
+        {compact ? <Image source={item.image} style={s.thumb} resizeMode={item.trade ? 'contain' : 'cover'} /> : <View style={s.inline}>
+          <Avatar source={clubs[item.club].logo} size={33} /><View style={s.flex}><Text style={s.rowTitle}>{item.trade?.author ?? '라팍티켓'}  <Text style={s.link}>{clubs[item.club].name}</Text></Text><Text style={s.tiny}>{item.trade ? '방금 등록' : '23분 전'}</Text></View>
         </View>}
         <View style={compact ? s.flex : { marginTop: 7 }}>
           {compact && <Text style={s.link}>{item.group}</Text>}
           <Text style={s.postTitle} numberOfLines={compact ? 2 : undefined}>{item.title}</Text>
-          <Text style={s.small} numberOfLines={compact ? 2 : undefined}>{item.summary}</Text>
-          {!compact && <Text style={s.small}>💬 FANLINK 안전거래 또는 현장 전달 가능</Text>}
+          {item.trade && <Text style={s.link}>{item.trade.price.toLocaleString('ko-KR')}원</Text>}
+          <Text style={s.small} numberOfLines={compact || item.trade ? 2 : undefined}>{item.summary}</Text>
+          {!!item.trade && !compact && <Image source={item.image} style={s.thumb} resizeMode="contain" />}
+          {!compact && !item.trade && <Text style={s.small}>💬 FANLINK 안전거래 또는 현장 전달 가능</Text>}
         </View>
       </Pressable>
       <View style={[s.between, { marginTop: 6 }]}><View style={s.inline}>
@@ -248,9 +294,12 @@ function FanLink({ logout }: { logout: () => void }) {
     </>;
   }
   function community() {
-    const filtered = samplePosts.filter(item => item.club === club && item.group === group);
+    const filtered = posts.filter(item => item.club === club && item.group === group);
     return <>
-      <Text style={s.title}>커뮤니티</Text>
+      <View style={[s.between, s.wrap]}>
+        <Text style={[s.title, s.shrink]}>커뮤니티</Text>
+        <Pill label="거래 글쓰기" icon="create-outline" onPress={() => push('trade-compose')} />
+      </View>
       <View style={s.tileRow}>{clubs.map((c, i) => <Pressable accessibilityState={{ selected: i === club }} key={c.name} onPress={() => setClub(i)} style={[s.tile, { backgroundColor: ['#eaf2fc', '#e7f6fa', '#fbecec'][i] }, i === club && s.selectedTile]}><Image source={c.logo} style={s.clubLogo} /><Text style={s.rowTitle}>{c.name}</Text></Pressable>)}</View>
       <View style={s.tileRow}>{categories.map(c => <Pressable accessibilityState={{ selected: c.name === group }} key={c.name} onPress={() => setGroup(c.name)} style={[s.tile, c.name === group && s.selectedTile]}><Icon name={c.icon} size={27} color={blue} /><Text style={s.rowTitle}>{c.name}</Text></Pressable>)}</View>
       {filtered.length ? filtered.map(item => postCard(item)) : <Empty text="이 구단의 해당 카테고리에 게시글이 없어요." />}
@@ -309,22 +358,32 @@ function FanLink({ logout }: { logout: () => void }) {
     return <>
       <Text style={s.link}>{post.group}   ·   {clubs[post.club].name} ›</Text>
       <Text style={s.detailTitle}>{post.title}</Text>
-      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={35} /><View style={s.flex}><Text style={s.rowTitle}>라팍티켓 <Text style={s.link}>☑ Lv.4</Text></Text><Text style={s.tiny}>23분 전 · 조회 312</Text></View></View><Pill label={following ? '팔로잉' : '팔로우'} selected={following} onPress={() => setFollowing(!following)} /></View>
+      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={35} /><View style={s.flex}><Text style={s.rowTitle}>{post.trade?.author ?? '라팍티켓'} {!post.trade && <Text style={s.link}>☑ Lv.4</Text>}</Text><Text style={s.tiny}>{post.trade ? '내 게시글' : '23분 전 · 조회 312'}</Text></View></View>{!post.trade && <Pill label={following ? '팔로잉' : '팔로우'} selected={following} onPress={() => setFollowing(!following)} />}</View>
       <View style={s.detailCopy}>
-        {post.group === '티켓' && <Text style={s.body}>🗓 경기정보 · {post.title.replace('[정가양도] ', '')}{'\n'}⏰ 일시 · 11/8 (토) 17:00{'\n'}📍 장소 · 대구 삼성라이온즈파크</Text>}
+        {!post.trade && post.group === '티켓' && <Text style={s.body}>🗓 경기정보 · {post.title.replace('[정가양도] ', '')}{'\n'}⏰ 일시 · 11/8 (토) 17:00{'\n'}📍 장소 · 대구 삼성라이온즈파크</Text>}
+        {post.trade && <>
+          <Text style={s.postTitle}>판매 희망가 · {post.trade.price.toLocaleString('ko-KR')}원</Text>
+          <Text style={s.small}>검증 기준 데모 정가 · {post.trade.referencePrice.toLocaleString('ko-KR')}원</Text>
+        </>}
         <Text style={s.body}>{post.summary}</Text>
-        <Text style={s.body}>💬 거래방법 · FANLINK 안전거래 또는 현장 전달 가능</Text>
-        <Text style={s.body}>개인 사정으로 못 가게 되어 양도합니다! 관심 있으신 분은 편하게 1:1 채팅 주세요. 🙏</Text>
+        {!post.trade && <>
+          <Text style={s.body}>💬 거래방법 · FANLINK 안전거래 또는 현장 전달 가능</Text>
+          <Text style={s.body}>개인 사정으로 못 가게 되어 양도합니다! 관심 있으신 분은 편하게 1:1 채팅 주세요. 🙏</Text>
+        </>}
       </View>
       <View style={s.detailImageFrame}>
         <Image source={post.image} style={s.detailImage} resizeMode="contain" />
       </View>
       <View style={[s.between, s.wrap]}>
         <View style={s.inline}><Pill label={String(post.likes + Number(liked.includes(post.id)))} icon={liked.includes(post.id) ? 'heart' : 'heart-outline'} onPress={() => setLiked(flip(liked, post.id))} /><Pill label={String(post.replies + (comments[post.id]?.length ?? 0))} icon="chatbubble-outline" onPress={() => scroller.current?.scrollToEnd()} /></View>
-        <Pill label={post.group === '카풀' || post.group === '직관메이트' ? '매칭 신청' : '1:1 채팅'} icon="chatbubble-outline" onPress={() => openChat(post.group === '티켓' ? '라팍티켓' : post.group === '굿즈' ? '라이온즈굿즈' : post.group === '카풀' ? '카풀메이트' : '직관메이트', post)} />
+        {!post.trade && <Pill label={post.group === '카풀' || post.group === '직관메이트' ? '매칭 신청' : '1:1 채팅'} icon="chatbubble-outline" onPress={() => openChat(post.group === '티켓' ? '라팍티켓' : post.group === '굿즈' ? '라이온즈굿즈' : post.group === '카풀' ? '카풀메이트' : '직관메이트', post)} />}
       </View>
+      {post.trade && <View style={[s.inline, s.wrap]}>
+        <Pill label="글 수정" icon="create-outline" onPress={() => push('trade-edit')} />
+        <Pill label="글 삭제" icon="trash-outline" onPress={deleteTrade} />
+      </View>}
       <Section title={'댓글 ' + (post.replies + (comments[post.id]?.length ?? 0))}>
-        {['아직 구매 가능할까요?', '혹시 현장 수령만 가능한가요?', ...(comments[post.id] ?? [])].map((value, i) => <View key={i} style={s.comment}><Avatar size={31} source={i === 0 ? images.samsung : images.avatar} /><View style={s.flex}><Text style={s.rowTitle}>{i === 0 ? '삼성팬⚾' : i === 1 ? '라이온즈사랑' : nickname}</Text><Text style={s.body}>{value}</Text><Pressable onPress={() => setDraft(i < 2 ? '@' + (i === 0 ? '삼성팬 ' : '라이온즈사랑 ') : '')}><Text style={s.tiny}>답글쓰기</Text></Pressable></View><Icon name="heart" size={13} color="#f25165" /></View>)}
+        {[...(post.trade ? [] : ['아직 구매 가능할까요?', '혹시 현장 수령만 가능한가요?']), ...(comments[post.id] ?? [])].map((value, i) => <View key={i} style={s.comment}><Avatar size={31} source={i === 0 ? images.samsung : images.avatar} /><View style={s.flex}><Text style={s.rowTitle}>{!post.trade && i === 0 ? '삼성팬⚾' : !post.trade && i === 1 ? '라이온즈사랑' : nickname}</Text><Text style={s.body}>{value}</Text><Pressable onPress={() => setDraft(!post.trade && i < 2 ? '@' + (i === 0 ? '삼성팬 ' : '라이온즈사랑 ') : '')}><Text style={s.tiny}>답글쓰기</Text></Pressable></View><Icon name="heart" size={13} color="#f25165" /></View>)}
       </Section>
     </>;
   }
@@ -420,14 +479,15 @@ function FanLink({ logout }: { logout: () => void }) {
     </>;
   }
   function activities() {
-    const items = activity === '저장한 글' ? samplePosts.filter(item => saved.includes(item.id))
-      : activity === '최근 본 글' ? viewed.flatMap(id => samplePosts.filter(item => item.id === id)) : myPosts;
+    const items = activity === '저장한 글' ? posts.filter(item => saved.includes(item.id))
+      : activity === '최근 본 글' ? viewed.flatMap(id => posts.filter(item => item.id === id))
+      : activity === '게시글' ? [...tradePosts, ...myPosts] : myPosts;
     const filtered = items.filter(item => activityFilter === '전체' || item.group === activityFilter);
     return <>
       <Pills items={['게시글', '댓글', '거래내역', '저장한 글']} value={activity} onChange={value => value === '거래내역' ? push('history') : openActivity(value)} />
       <Pills items={['전체', ...categories.map(item => item.name)]} value={activityFilter} onChange={setActivityFilter} />
       {filtered.length ? filtered.map((item, i) => activity === '댓글' ? <View key={item.id} style={s.card}><Text style={s.body}>◌  {['네! 아직 2연석 모두 가능합니다!', '거래 방법은 링크페이로 진행하시면 됩니다!', '저도 참여하고 싶어요! 2명 가능합니다!', '혹시 사이즈 알 수 있을까요?'][i]}</Text><Pressable style={[s.inline, s.commentPreview]} onPress={() => openPost(item)}><Image source={item.image} style={s.thumb} /><View style={s.flex}><Text style={s.link}>{item.group}</Text><Text style={s.postTitle} numberOfLines={2}>{item.title}</Text><Text style={s.tiny}>{item.summary}</Text></View></Pressable></View> : postCard(item, true)) : <Empty />}
-      {activity === '게시글' && <View style={s.endButton}><Button label="▱  게시글 작성" onPress={() => info('게시글 작성', '첨부 디자인에는 글쓰기 화면이 포함되어 있지 않아요.')} /></View>}
+      {activity === '게시글' && <View style={s.endButton}><Button label="▱  게시글 작성" onPress={() => push('trade-compose')} /></View>}
     </>;
   }
   function history() {
@@ -488,7 +548,15 @@ function FanLink({ logout }: { logout: () => void }) {
   const isTab = tabScreens.includes(screen);
   const isComposer = screen === 'chat' || screen === 'detail';
   const scroller = React.useRef<ScrollView>(null);
-  const content = screen === 'home' ? home() : screen === 'community' ? community() : screen === 'chats' ? chats() :
+  const editDraft: TradeDraft | undefined = screen === 'trade-edit' && post.trade
+    && (post.group === '티켓' || post.group === '굿즈') ? {
+      group: post.group, club: post.club, title: post.title, body: post.summary,
+      price: post.trade.price, imageUri: post.trade.imageUri, referencePrice: post.trade.referencePrice,
+    } : undefined;
+  const content = screen === 'trade-compose' || screen === 'trade-edit' ? (
+    <TradeComposer initialGroup={group === '굿즈' ? '굿즈' : '티켓'} initialClub={club}
+      initialDraft={editDraft} clubs={clubs.map(item => item.name)} onPublish={publishTrade} />
+  ) : screen === 'home' ? home() : screen === 'community' ? community() : screen === 'chats' ? chats() :
     screen === 'my' ? my() : screen === 'detail' ? detail() : screen === 'chat' ? chatRoom() :
     screen === 'profile' ? profile() : screen === 'security' ? security() : screen === 'notifications' ? notifications() :
     screen === 'settings' ? preferences() : screen === 'history' ? history() :
