@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
 import {
   Alert, BackHandler, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable,
-  ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, View,
+  ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import AuthGate from './AuthGate';
 import TradeComposer, { type TradeDraft } from './TradeComposer';
+import RecruitmentComposer, {
+  RecruitmentCard, isRecruitmentGroup, type Recruitment, type RecruitmentDraft, type RecruitmentStatus,
+} from './Recruitment';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 type Screen = 'home' | 'community' | 'chats' | 'my' | 'detail' | 'chat' |
   'profile' | 'security' | 'notifications' | 'settings' | 'posts' | 'comments' |
-  'history' | 'notices' | 'guide' | 'help' | 'empty' | 'trade-compose' | 'trade-edit';
+  'history' | 'notices' | 'guide' | 'help' | 'empty' | 'trade-compose' | 'trade-edit' | 'recruit-compose' | 'joined';
 type Group = '티켓' | '굿즈' | '카풀' | '직관메이트';
 
 const blue = '#075cf1';
@@ -42,15 +46,18 @@ const categories: { name: Group; icon: IconName }[] = [
   { name: '티켓', icon: 'ticket' }, { name: '굿즈', icon: 'bag-handle' },
   { name: '카풀', icon: 'car-sport' }, { name: '직관메이트', icon: 'people' },
 ];
-type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string } };
+type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment };
+type MatchStatus = '신청 중' | '호스트 동의' | '상호 동의' | '참여 확정' | '참여 취소' | '거절됨';
 const samplePosts: Post[] = [
   { id: 1, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 vs 키움 히어로즈 (11/8 토)', summary: '3루 내야지정석 13블록 8열 12, 13번 (연석 2매)\n정가 26,000원/매 (총 52,000원)', image: images.stadium, likes: 24, replies: 7 },
   { id: 2, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 vs SSG 랜더스 (11/9 일)', summary: '1루 내야지정석 5블록 10열 5번 (1매)\n정가 28,000원', image: images.stadium, likes: 18, replies: 4 },
   { id: 3, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 홈경기 티켓 (11/15 토)', summary: '1루 외야지정석 102블록 6열 21, 22번 (연석 2매)\n정가 12,000원/매', image: images.stadium, likes: 31, replies: 9 },
   { id: 4, group: '굿즈', club: 0, title: '[양도] 삼성라이온즈 유니폼 (L, 유광)', summary: '홈 유니폼 · L사이즈 · 1회 착용', image: images.jersey, likes: 12, replies: 5 },
-  { id: 5, group: '직관메이트', club: 0, title: '[모집] 11/15(토) 두산전 직관 메이트 구해요!', summary: '3루 응원석 · 2~4명 · 같이 응원해요!', image: images.stadium, likes: 18, replies: 11 },
+  { id: 5, group: '직관메이트', club: 0, title: '[모집] 11/15(토) 두산전 직관 메이트 구해요!', summary: '3루 응원석에서 같이 응원해요! 경기 시작 전에 만나 좌석으로 이동해요.', image: images.stadium, likes: 18, replies: 11,
+    recruitment: { group: '직관메이트', club: 0, title: '두산전 직관 메이트', gameAt: '2026-11-15 17:00', capacity: 4, departure: '삼성라이온즈파크 3번 게이트', destination: '', departureAt: '', route: '', conditions: '경기 30분 전에 만나요.', author: '직관메이트', status: '모집 중' } },
   { id: 6, group: '굿즈', club: 0, title: '[판매] 삼성 라이온즈 모자 (신형)', summary: '공식 굿즈 · 프리사이즈 · 미사용', image: images.cap, likes: 5, replies: 3 },
-  { id: 7, group: '카풀', club: 1, title: '[카풀] 동대구역에서 경기장 같이 가요', summary: '동대구역 출발 · 2자리 · 오후 1시', image: images.stadium, likes: 8, replies: 2 },
+  { id: 7, group: '카풀', club: 1, title: '[카풀] 동대구역에서 경기장 같이 가요', summary: '동대구역에서 만나 함께 경기장으로 이동해요.', image: images.stadium, likes: 8, replies: 2,
+    recruitment: { group: '카풀', club: 1, title: '동대구역에서 경기장까지 카풀', gameAt: '2026-11-15 15:00', capacity: 2, departure: '동대구역 2번 출구', destination: '대구iM뱅크파크', departureAt: '2026-11-15 13:00', route: '신천대로', conditions: '출발 10분 전에 모여 주세요.', author: '카풀메이트', status: '모집 중' } },
 ];
 const chatSamples = [
   ['라팍티켓', '네! 아직 예매 가능해요!', '오후 5:24', 2, 0],
@@ -62,12 +69,13 @@ const chatSamples = [
   ['라온이', '좌석 사진 한 번만 더 보내주실 수 있을까요?', '오전 11:48', 0, 0],
   ['푸른물결', '넵! 거래 방법은 어떻게 하실까요?', '오전 10:06', 0, 0],
 ] as const;
-const myPosts = [samplePosts[0], samplePosts[3], samplePosts[4], samplePosts[5]];
+const myPosts = [samplePosts[0], samplePosts[3], samplePosts[5]];
+const matchRoomKey = (id: number) => "matching:" + id;
 const tabScreens: Screen[] = ['home', 'community', 'chats', 'my'];
 const tabIcons: IconName[] = ['home', 'list', 'chatbubble-ellipses', 'person'];
 const tabLabels = ['홈', '커뮤니티', '채팅', '마이'];
 const titles: Partial<Record<Screen, string>> = {
-  profile: '내 프로필', security: '계정 및 보안', notifications: '알림 설정',
+  joined: '참여 중인 모임', profile: '내 프로필', security: '계정 및 보안', notifications: '알림 설정',
   settings: '환경 설정', posts: '내 게시글', comments: '내 댓글', history: '거래내역',
   notices: '공지사항', guide: '이용가이드', help: '문의하기',
 };
@@ -121,6 +129,8 @@ export default function App() {
   return <SafeAreaProvider><StatusBar barStyle="dark-content" /><AuthGate>{logout => <FanLink logout={logout} />}</AuthGate></SafeAreaProvider>;
 }
 function FanLink({ logout }: { logout: () => void }) {
+  const { height, fontScale } = useWindowDimensions();
+  const compactChat = height < 650 || fontScale > 1.35;
   const [stack, setStack] = useState<Screen[]>(['home']);
   const screen = stack[stack.length - 1];
   const push = (route: Screen) => setStack(old => [...old, route]);
@@ -144,7 +154,10 @@ function FanLink({ logout }: { logout: () => void }) {
   const [post, setPost] = useState(samplePosts[0]);
   const [tradePosts, setTradePosts] = useState<Post[]>([]);
   const nextPostId = React.useRef(samplePosts.length + 1);
-  const posts = [...tradePosts, ...samplePosts];
+  const [recruitmentPosts, setRecruitmentPosts] = useState<Post[]>([]);
+  const [matches, setMatches] = useState<Record<number, MatchStatus>>({});
+  const posts = [...recruitmentPosts, ...tradePosts, ...samplePosts];
+  const ownPosts = [...recruitmentPosts, ...tradePosts, ...myPosts];
   const [chat, setChat] = useState('라팍티켓');
   const [readRooms, setReadRooms] = useState<string[]>([]);
   const [saved, setSaved] = useState<number[]>([]);
@@ -164,8 +177,24 @@ function FanLink({ logout }: { logout: () => void }) {
   const [search, setSearch] = useState<string | null>(null);
   const [activity, setActivity] = useState('게시글');
   const [nickname, setNickname] = useState('라팍직관러');
+  const [fanClub, setFanClub] = useState(0);
+  const [fanVerified, setFanVerified] = useState(false);
+  const [profileImage, setProfileImage] = useState<ImageSourcePropType>(images.avatar);
+  const profilePickerPending = React.useRef(false);
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  async function pickProfileImage() {
+    if (profilePickerPending.current) return;
+    profilePickerPending.current = true;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+      if (!result.canceled) setProfileImage({ uri: result.assets[0].uri });
+    } catch {
+      Alert.alert('사진 선택 실패', '사진을 다시 선택해 주세요.');
+    } finally {
+      profilePickerPending.current = false;
+    }
+  }
   const publishTrade = ({ group, club, title, body, price, imageUri, referencePrice }: TradeDraft) => {
     const existing = screen === 'trade-edit' && post.trade ? post : undefined;
     const savedPost: Post = {
@@ -206,6 +235,24 @@ function FanLink({ logout }: { logout: () => void }) {
     ]);
   };
 
+  const publishRecruitment = (draft: RecruitmentDraft) => {
+    const item: Post = {
+      id: nextPostId.current++, group: draft.group, club: draft.club, title: draft.title,
+      summary: draft.conditions, image: images.stadium, likes: 0, replies: 0,
+      recruitment: { ...draft, author: nickname, status: '모집 중', own: true },
+    };
+    setRecruitmentPosts(old => [item, ...old]);
+    setGroup(item.group);
+    setClub(item.club);
+    setActivityFilter('전체');
+    back();
+  };
+  const updateRecruitmentStatus = (status: RecruitmentStatus) => {
+    if (!post.recruitment?.own || post.recruitment.status === status) return;
+    const updated = { ...post, recruitment: { ...post.recruitment, status } };
+    setRecruitmentPosts(old => old.map(item => item.id === updated.id ? updated : item));
+    setPost(updated);
+  };
   const openPost = (p: Post) => {
     setPost(p);
     setViewed(old => [p.id, ...old.filter(id => id !== p.id)]);
@@ -219,6 +266,17 @@ function FanLink({ logout }: { logout: () => void }) {
     setDraft('');
     push('chat');
   };
+  const openMatch = (item: Post) => {
+    const recruitment = item.recruitment;
+    if (!recruitment || recruitment.own) return;
+    if (!matches[item.id] && recruitment.status !== '모집 중') return;
+    setMatches(old => old[item.id] ? old : { ...old, [item.id]: '신청 중' });
+    setChatGroup(recruitment.group);
+    openChat(recruitment.author, item);
+  };
+  const changeMatch = (id: number, expected: MatchStatus, next: MatchStatus) => {
+    setMatches(old => old[id] === expected ? { ...old, [id]: next } : old);
+  };
   const toggle = (key: string, initial = true) => ({
     value: settings[key] ?? initial,
     onChange: (value: boolean) => setSettings(old => ({ ...old, [key]: value })),
@@ -229,7 +287,12 @@ function FanLink({ logout }: { logout: () => void }) {
   const send = () => {
     const value = draft.trim();
     if (!value) return;
-    if (screen === 'chat') setMessages(old => ({ ...old, [chat]: [...(old[chat] ?? []), value] }));
+    if (screen === 'chat') {
+      const status = matches[chatPost.id];
+      if (chatPost.recruitment && (status === '거절됨' || status === '참여 취소')) return;
+      const key = chatPost.recruitment ? matchRoomKey(chatPost.id) : chat;
+      setMessages(old => ({ ...old, [key]: [...(old[key] ?? []), value] }));
+    }
     else setComments(old => ({ ...old, [post.id]: [...(old[post.id] ?? []), value] }));
     setDraft('');
   };
@@ -238,7 +301,7 @@ function FanLink({ logout }: { logout: () => void }) {
     return <View key={item.id} style={s.card}>
       <Pressable onPress={() => openPost(item)} style={compact ? s.inline : undefined}>
         {compact ? <Image source={item.image} style={s.thumb} resizeMode={item.trade ? 'contain' : 'cover'} /> : <View style={s.inline}>
-          <Avatar source={clubs[item.club].logo} size={33} /><View style={s.flex}><Text style={s.rowTitle}>{item.trade?.author ?? '라팍티켓'}  <Text style={s.link}>{clubs[item.club].name}</Text></Text><Text style={s.tiny}>{item.trade ? '방금 등록' : '23분 전'}</Text></View>
+          <Avatar source={clubs[item.club].logo} size={33} /><View style={s.flex}><Text style={s.rowTitle}>{item.recruitment?.author ?? item.trade?.author ?? '라팍티켓'}  <Text style={s.link}>{clubs[item.club].name}</Text></Text><Text style={s.tiny}>{item.trade || item.recruitment?.own ? '내 게시글' : '23분 전'}</Text></View>
         </View>}
         <View style={compact ? s.flex : { marginTop: 7 }}>
           {compact && <Text style={s.link}>{item.group}</Text>}
@@ -246,7 +309,8 @@ function FanLink({ logout }: { logout: () => void }) {
           {item.trade && <Text style={s.link}>{item.trade.price.toLocaleString('ko-KR')}원</Text>}
           <Text style={s.small} numberOfLines={compact || item.trade ? 2 : undefined}>{item.summary}</Text>
           {!!item.trade && !compact && <Image source={item.image} style={s.thumb} resizeMode="contain" />}
-          {!compact && !item.trade && <Text style={s.small}>💬 FANLINK 안전거래 또는 현장 전달 가능</Text>}
+          {item.recruitment && <RecruitmentCard recruitment={item.recruitment} compact />}
+          {!compact && !item.trade && !item.recruitment && <Text style={s.small}>💬 FANLINK 안전거래 또는 현장 전달 가능</Text>}
         </View>
       </Pressable>
       <View style={[s.between, { marginTop: 6 }]}><View style={s.inline}>
@@ -269,6 +333,7 @@ function FanLink({ logout }: { logout: () => void }) {
   }
 
   function home() {
+    const orderedClubs = [clubs[fanClub], ...clubs.filter((_, index) => index !== fanClub)];
     return <>
       <View style={[s.banner, s.weather]}>
         <Icon name="partly-sunny" color="#fff49a" size={36} />
@@ -281,16 +346,20 @@ function FanLink({ logout }: { logout: () => void }) {
         </View>
         <Image source={images.weather} style={s.weatherArt} />
       </View>
-      <Section title="주요 경기 일정">{clubs.map(c => <View key={c.name} style={s.matchCard}>
+      <Section title="주요 경기 일정">{orderedClubs.map(c => <View key={c.name} style={s.matchCard}>
         <View style={[s.matchHead, { backgroundColor: c.color }]}><Icon name={c.league === 'KBO' ? 'baseball-outline' : 'football-outline'} color="white" size={17} /><Text style={s.whiteSmall}>{c.name} ({c.league})</Text></View>
         <View style={s.matchBody}><View style={s.team}><Image source={c.logo} style={s.teamLogo} /><Text style={s.rowTitle}>{c.name}</Text></View><Text style={s.vs}>VS</Text>
           <View style={s.team}><Image source={c.rivalLogo} style={s.teamLogo} /><Text style={s.rowTitle}>{c.rival}</Text></View>
           <View style={s.matchTime}><Text style={s.rowTitle}>▣  {c.date}</Text><Text style={s.small}>◷  {c.time}</Text>{!!c.place && <Text style={s.small}>⌖  {c.place}</Text>}</View>
         </View>
       </View>)}</Section>
-      <Section title="🔥 인기게시물" action={() => replace('community')}><View style={s.panel}>{[
-        '삼성 라이온즈 가을야구 진출 가능성 분석', '대구FC 이번 주 경기 응원계획 같이 해요!', '포항 스틸러스, 부천전 선발 라인업 예상',
-      ].map((label, i) => <Row key={label} icon="trophy-outline" label={label} hint={i === 0 ? '128  ·  ♥ 342  ·  2시간 전' : '경기 소식 · 팬 커뮤니티'} onPress={() => openPost(samplePosts[i])} />)}</View></Section>
+      <Section title="🔥 인기게시물" action={() => replace('community')}>
+        <View style={s.panel}>
+          {[...posts].sort((a, b) => b.likes - a.likes).slice(0, 3).map(item =>
+            <Row key={item.id} icon="trophy-outline" label={item.title}
+              hint={'좋아요 ' + item.likes + ' · 댓글 ' + item.replies} onPress={() => openPost(item)} />)}
+        </View>
+      </Section>
     </>;
   }
   function community() {
@@ -298,7 +367,8 @@ function FanLink({ logout }: { logout: () => void }) {
     return <>
       <View style={[s.between, s.wrap]}>
         <Text style={[s.title, s.shrink]}>커뮤니티</Text>
-        <Pill label="거래 글쓰기" icon="create-outline" onPress={() => push('trade-compose')} />
+        <Pill label={isRecruitmentGroup(group) ? '모집 글쓰기' : '거래 글쓰기'} icon="create-outline"
+          onPress={() => push(isRecruitmentGroup(group) ? 'recruit-compose' : 'trade-compose')} />
       </View>
       <View style={s.tileRow}>{clubs.map((c, i) => <Pressable accessibilityState={{ selected: i === club }} key={c.name} onPress={() => setClub(i)} style={[s.tile, { backgroundColor: ['#eaf2fc', '#e7f6fa', '#fbecec'][i] }, i === club && s.selectedTile]}><Image source={c.logo} style={s.clubLogo} /><Text style={s.rowTitle}>{c.name}</Text></Pressable>)}</View>
       <View style={s.tileRow}>{categories.map(c => <Pressable accessibilityState={{ selected: c.name === group }} key={c.name} onPress={() => setGroup(c.name)} style={[s.tile, c.name === group && s.selectedTile]}><Icon name={c.icon} size={27} color={blue} /><Text style={s.rowTitle}>{c.name}</Text></Pressable>)}</View>
@@ -309,27 +379,35 @@ function FanLink({ logout }: { logout: () => void }) {
     const index = categories.findIndex(c => c.name === chatGroup);
     const extraRooms = [
       ['라이온즈굿즈', '유니폼 아직 있어요!', '오후 1:10', 0, 1],
-      ['카풀메이트', '동대구역에서 만나요.', '오후 2:00', 0, 2],
-      ['직관메이트', '경기장에서 같이 응원해요!', '오후 2:30', 0, 3],
     ] as const;
     const list = [...chatSamples, ...extraRooms].filter(item =>
       item[4] === index && (!search || item[0].includes(search) || item[1].includes(search))
     );
+    const matchingRooms = posts.filter(item => item.recruitment && item.group === chatGroup && matches[item.id]
+      && (!search || item.title.includes(search) || item.recruitment.author.includes(search)));
     return <>
-      <View style={s.between}><Text style={s.title}>1대1 채팅</Text><View style={s.inline}><IconButton name="search-outline" label="채팅 검색" onPress={() => setSearch(search === null ? '' : null)} /><IconButton name="create-outline" label="새 채팅" onPress={() => replace('community')} /></View></View>
+      <View style={s.between}><Text style={[s.title, s.shrink]}>1대1 채팅</Text><View style={s.inline}><IconButton name="search-outline" label="채팅 검색" onPress={() => setSearch(search === null ? '' : null)} /><IconButton name="create-outline" label="새 채팅" onPress={() => replace('community')} /></View></View>
       {search !== null && <TextInput placeholder="채팅방 검색" style={s.input} value={search} onChangeText={setSearch} />}
       <Pills items={categories.map(c => c.name)} value={chatGroup} onChange={setChatGroup} />
+      {matchingRooms.map(item => <Pressable key={item.id} onPress={() => openMatch(item)} style={s.chatRow}>
+        <Avatar source={clubs[item.club].logo} size={47} />
+        <View style={s.flex}>
+          <Text style={s.postTitle}>{item.title}</Text>
+          <Text style={s.small} numberOfLines={2}>{messages[matchRoomKey(item.id)]?.at(-1) ?? matches[item.id]}</Text>
+        </View>
+        <Icon name="chevron-forward" size={14} />
+      </Pressable>)}
       {list.length ? list.map(([name, message, time, unread], i) => <Pressable key={name} onPress={() => openChat(name, samplePosts[[0, 3, 6, 4][index]])} style={s.chatRow}>
         <Avatar source={[images.avatar, images.samsung, images.cap, images.stadium][i % 4]} size={47} />
         <View style={s.flex}><Text style={s.postTitle}>{name}</Text><Text style={s.small} numberOfLines={1}>{messages[name]?.at(-1) ?? message}</Text></View>
         <View style={s.chatMeta}><Text style={s.tiny}>{time}</Text>{!!unread && !readRooms.includes(name) && <Text style={s.unread}>{unread}</Text>}</View>
-      </Pressable>) : <Empty text="채팅 내역이 없어요." />}
+      </Pressable>) : !matchingRooms.length && <Empty text="채팅 내역이 없어요." />}
     </>;
   }
   function my() {
     return <>
       <Text style={s.title}>마이페이지</Text>
-      <View style={[s.banner, s.profileBanner]}><Image source={images.profileArt} style={s.profileArt} /><View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={54} /><View style={s.flex}><Text style={s.whiteTitle}>{nickname} ☑</Text><Text style={s.whiteSmall}>삼성 라이온즈 팬 · Lv.4</Text></View></View><Pill label="프로필 편집" onPress={() => push('profile')} /></View>
+      <View style={[s.banner, s.profileBanner]}><Image source={images.profileArt} style={s.profileArt} /><View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={54} source={profileImage} /><View style={s.flex}><Text style={s.whiteTitle}>{nickname}{fanVerified ? ' ☑' : ''}</Text><Text style={s.whiteSmall}>{clubs[fanClub].name} 팬 · 매너온도 36.5°C (샘플)</Text></View></View><Pill label="프로필 편집" onPress={() => push('profile')} /></View>
         <View style={s.profileCounts}>{[['128', '게시글'], ['432', '댓글'], ['56', '거래내역'], ['18', '팔로워']].map(([number, name]) => <View key={name} style={s.stat}><Text style={s.whiteTitle}>{number}</Text><Text style={s.whiteSmall}>{name}</Text></View>)}</View>
       </View>
       {linkPay(() => push('history'))}
@@ -339,6 +417,10 @@ function FanLink({ logout }: { logout: () => void }) {
         ['거래/정산 내역', 'swap-horizontal-outline', () => push('history')],
         ['최근 본 글', 'time-outline', () => openActivity('최근 본 글')],
       ] as [string, IconName, () => void][]).map(([label, icon, fn]) => <Pressable key={label} style={s.tile} onPress={fn}><Icon name={icon} color={blue} size={20} /><Text style={s.tiny}>{label}</Text></Pressable>)}</View></Section>
+      <View style={s.panel}>
+        <Row icon="people-outline" label="참여 중인 모임" value={String(Object.values(matches).filter(status => status === '참여 확정').length)}
+          onPress={() => push('joined')} />
+      </View>
       <Section title="계정 관리"><View style={s.panel}>
         <Row icon="person-outline" label="내 프로필" value="닉네임, 소개, 관심팀 설정" onPress={() => push('profile')} />
         <Row icon="shield-checkmark-outline" label="계정 및 보안" value="비밀번호, 로그인 관리" onPress={() => push('security')} />
@@ -358,7 +440,8 @@ function FanLink({ logout }: { logout: () => void }) {
     return <>
       <Text style={s.link}>{post.group}   ·   {clubs[post.club].name} ›</Text>
       <Text style={s.detailTitle}>{post.title}</Text>
-      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={35} /><View style={s.flex}><Text style={s.rowTitle}>{post.trade?.author ?? '라팍티켓'} {!post.trade && <Text style={s.link}>☑ Lv.4</Text>}</Text><Text style={s.tiny}>{post.trade ? '내 게시글' : '23분 전 · 조회 312'}</Text></View></View>{!post.trade && <Pill label={following ? '팔로잉' : '팔로우'} selected={following} onPress={() => setFollowing(!following)} />}</View>
+      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={35} /><View style={s.flex}><Text style={s.rowTitle}>{post.recruitment?.author ?? post.trade?.author ?? '라팍티켓'} {!post.trade && !post.recruitment && <Text style={s.link}>☑ Lv.4</Text>}</Text><Text style={s.tiny}>{post.trade || post.recruitment?.own ? '내 게시글' : '23분 전 · 조회 312'}</Text></View></View>{!post.trade && !post.recruitment && <Pill label={following ? '팔로잉' : '팔로우'} selected={following} onPress={() => setFollowing(!following)} />}</View>
+      {post.recruitment && <RecruitmentCard recruitment={post.recruitment} />}
       <View style={s.detailCopy}>
         {!post.trade && post.group === '티켓' && <Text style={s.body}>🗓 경기정보 · {post.title.replace('[정가양도] ', '')}{'\n'}⏰ 일시 · 11/8 (토) 17:00{'\n'}📍 장소 · 대구 삼성라이온즈파크</Text>}
         {post.trade && <>
@@ -366,51 +449,104 @@ function FanLink({ logout }: { logout: () => void }) {
           <Text style={s.small}>검증 기준 데모 정가 · {post.trade.referencePrice.toLocaleString('ko-KR')}원</Text>
         </>}
         <Text style={s.body}>{post.summary}</Text>
-        {!post.trade && <>
+        {!post.trade && !post.recruitment && <>
           <Text style={s.body}>💬 거래방법 · FANLINK 안전거래 또는 현장 전달 가능</Text>
           <Text style={s.body}>개인 사정으로 못 가게 되어 양도합니다! 관심 있으신 분은 편하게 1:1 채팅 주세요. 🙏</Text>
         </>}
       </View>
-      <View style={s.detailImageFrame}>
+      {!post.recruitment?.own && <View style={s.detailImageFrame}>
         <Image source={post.image} style={s.detailImage} resizeMode="contain" />
-      </View>
+      </View>}
       <View style={[s.between, s.wrap]}>
         <View style={s.inline}><Pill label={String(post.likes + Number(liked.includes(post.id)))} icon={liked.includes(post.id) ? 'heart' : 'heart-outline'} onPress={() => setLiked(flip(liked, post.id))} /><Pill label={String(post.replies + (comments[post.id]?.length ?? 0))} icon="chatbubble-outline" onPress={() => scroller.current?.scrollToEnd()} /></View>
-        {!post.trade && <Pill label={post.group === '카풀' || post.group === '직관메이트' ? '매칭 신청' : '1:1 채팅'} icon="chatbubble-outline" onPress={() => openChat(post.group === '티켓' ? '라팍티켓' : post.group === '굿즈' ? '라이온즈굿즈' : post.group === '카풀' ? '카풀메이트' : '직관메이트', post)} />}
+        {!post.trade && !post.recruitment && <Pill label="1:1 채팅" icon="chatbubble-outline"
+          onPress={() => openChat(post.group === '굿즈' ? '라이온즈굿즈' : '라팍티켓', post)} />}
+        {post.recruitment && !post.recruitment.own && (matches[post.id] || post.recruitment.status === '모집 중')
+          && <Pill label={matches[post.id] ? '매칭 채팅 열기' : '1:1 매칭 신청'} icon="chatbubble-outline" onPress={() => openMatch(post)} />}
+        {post.recruitment && !post.recruitment.own && !matches[post.id] && post.recruitment.status !== '모집 중'
+          && <Text style={[s.small, s.shrink]}>이 모집 글은 신청이 마감됐어요.</Text>}
       </View>
+      {post.recruitment?.own && <View style={[s.inline, s.wrap]}>
+        {(['모집 중', '모집 완료', '취소'] as const).map(status =>
+          <Pill key={status} label={status} selected={post.recruitment?.status === status}
+            onPress={() => updateRecruitmentStatus(status)} />)}
+      </View>}
       {post.trade && <View style={[s.inline, s.wrap]}>
         <Pill label="글 수정" icon="create-outline" onPress={() => push('trade-edit')} />
         <Pill label="글 삭제" icon="trash-outline" onPress={deleteTrade} />
       </View>}
       <Section title={'댓글 ' + (post.replies + (comments[post.id]?.length ?? 0))}>
-        {[...(post.trade ? [] : ['아직 구매 가능할까요?', '혹시 현장 수령만 가능한가요?']), ...(comments[post.id] ?? [])].map((value, i) => <View key={i} style={s.comment}><Avatar size={31} source={i === 0 ? images.samsung : images.avatar} /><View style={s.flex}><Text style={s.rowTitle}>{!post.trade && i === 0 ? '삼성팬⚾' : !post.trade && i === 1 ? '라이온즈사랑' : nickname}</Text><Text style={s.body}>{value}</Text><Pressable onPress={() => setDraft(!post.trade && i < 2 ? '@' + (i === 0 ? '삼성팬 ' : '라이온즈사랑 ') : '')}><Text style={s.tiny}>답글쓰기</Text></Pressable></View><Icon name="heart" size={13} color="#f25165" /></View>)}
+        {[...(post.trade || post.recruitment ? [] : ['아직 구매 가능할까요?', '혹시 현장 수령만 가능한가요?']), ...(comments[post.id] ?? [])].map((value, i) => <View key={i} style={s.comment}><Avatar size={31} source={i === 0 ? images.samsung : images.avatar} /><View style={s.flex}><Text style={s.rowTitle}>{!post.trade && !post.recruitment && i === 0 ? '삼성팬⚾' : !post.trade && !post.recruitment && i === 1 ? '라이온즈사랑' : nickname}</Text><Text style={s.body}>{value}</Text><Pressable onPress={() => setDraft(!post.trade && !post.recruitment && i < 2 ? '@' + (i === 0 ? '삼성팬 ' : '라이온즈사랑 ') : '')}><Text style={s.tiny}>답글쓰기</Text></Pressable></View><Icon name="heart" size={13} color="#f25165" /></View>)}
       </Section>
     </>;
   }
+  function matchingChat() {
+    const status = matches[chatPost.id];
+    return <>
+      <Text style={s.dateChip}>오늘</Text>
+      <View style={s.card}>
+        <Text style={s.postTitle}>{chat} · 매칭 채팅</Text>
+        <Text style={s.body}>현재 상태 · {status}</Text>
+        <Text style={s.small}>출발 시간과 장소, 참여 조건을 채팅으로 조율해요.</Text>
+        {status === '신청 중' && <>
+          <Text style={s.small}>데모에서 상대방의 응답을 선택할 수 있어요.</Text>
+          <View style={[s.inline, s.wrap]}>
+            <Pill label="호스트 동의 (데모)" onPress={() => changeMatch(chatPost.id, status, '호스트 동의')} />
+            <Pill label="호스트 거절 (데모)" onPress={() => changeMatch(chatPost.id, status, '거절됨')} />
+          </View>
+        </>}
+      </View>
+      {(messages[matchRoomKey(chatPost.id)] ?? []).map((message, i) =>
+        <View key={i} style={[s.messageRow, s.messageMine]}>
+          <Text style={[s.bubble, s.bubbleMine]}>{message}</Text>
+        </View>)}
+    </>;
+  }
+
+  function matchActions(status: MatchStatus) {
+    const id = chatPost.id;
+    if (status === '참여 취소' || status === '거절됨') {
+      return <View style={s.matchActions}><Text style={s.small}>매칭이 종료됐어요 · {status}</Text></View>;
+    }
+    return <View style={s.matchActions}>
+      {status === '신청 중' && <Text style={[s.small, s.shrink]}>호스트 동의 대기 중</Text>}
+      {status === '호스트 동의' && <Pill label="나도 동의하기" selected onPress={() => changeMatch(id, status, '상호 동의')} />}
+      {status === '상호 동의' && <Pill label="참여 확정" selected onPress={() => changeMatch(id, status, '참여 확정')} />}
+      {status === '참여 확정' && <Pill label="참여 중인 모임" selected onPress={() => setStack(['my', 'joined'])} />}
+      <Pill label="참여 취소" onPress={() => Alert.alert('참여 취소', '이 모임 참여를 취소할까요?', [
+        { text: '닫기', style: 'cancel' },
+        { text: '참여 취소', style: 'destructive', onPress: () => changeMatch(id, status, '참여 취소') },
+      ])} />
+    </View>;
+  }
+
+  function joined() {
+    const confirmed = posts.filter(item => matches[item.id] === '참여 확정');
+    if (!confirmed.length) return <Empty text="확정된 모임이 없어요." />;
+    return confirmed.map(item => <View key={item.id} style={s.section}>
+      {postCard(item, true)}
+      <View style={s.endButton}><Pill label="매칭 채팅 열기" onPress={() => openMatch(item)} /></View>
+    </View>);
+  }
+
   function chatRoom() {
     const post = chatPost;
     const paymentKey = chat + ':' + post.id;
     const payment = completed.includes(paymentKey);
-    const matching = post.group === '카풀' || post.group === '직관메이트';
     return <>
-      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar /><View style={s.flex}><Text style={s.postTitle}>{chat} <Text style={s.link}>☑</Text></Text><Text style={s.tiny}>최근 접속 2분 전</Text></View></View><Pill label={matching ? '모집정보' : '거래정보'} icon="card-outline" onPress={() => openPost(post)} /></View>
+      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar /><View style={s.flex}><Text style={s.postTitle}>{chat} <Text style={s.link}>☑</Text></Text><Text style={s.tiny}>최근 접속 2분 전</Text></View></View><Pill label="거래정보" icon="card-outline" onPress={() => openPost(post)} /></View>
       <Pressable style={[s.card, s.inline]} onPress={() => openPost(post)}><Image source={post.image} style={s.thumb} /><View style={s.flex}><Text style={s.link}>{post.group}</Text><Text style={s.postTitle}>{post.title}</Text><Text style={s.tiny}>11/8 (토) 17:00 · 대구 삼성라이온즈파크</Text></View><Icon name="chevron-forward" size={14} /></Pressable>
       <Text style={s.dateChip}>오늘</Text>
-      {(matching ? [
-        [false, '안녕하세요! 아직 참여 가능할까요?'],
-        [true, '네! 경기 전에 만나서 함께 이동해요.'],
-        [false, '좋아요. 참여할게요!'],
-      ] : [
-        [false, '안녕하세요!\n티켓 아직 구매 가능할까요?'],
+      {[        [false, '안녕하세요!\n티켓 아직 구매 가능할까요?'],
         [true, '네! 아직 2연석 모두 가능합니다!'],
         [false, '다행이네요!\n가격 그대로 52,000원 맞을까요?'],
         [true, '네 맞습니다!\nFANLINK 링크페이로 결제하시면 돼요.\n결제 링크 보내드릴게요!'],
-      ]).map(([mine, message], i) => <View key={i} style={[s.messageRow, mine ? s.messageMine : s.messageTheirs]}>{!mine && <Avatar size={28} />}<Text style={[s.bubble, mine && s.bubbleMine]}>{message}</Text><Text style={s.tiny}>오후 5:{24 + i}</Text></View>)}
+      ].map(([mine, message], i) => <View key={i} style={[s.messageRow, mine ? s.messageMine : s.messageTheirs]}>{!mine && <Avatar size={28} />}<Text style={[s.bubble, mine && s.bubbleMine]}>{message}</Text><Text style={s.tiny}>오후 5:{24 + i}</Text></View>)}
       <View style={[s.messageRow, s.messageTheirs]}><Avatar size={28} /><View style={s.paymentCard}>
-        <Text style={s.link}>Ⅼ LinkPay</Text><Text style={s.postTitle}>{matching ? '참여 의사 확인' : '티켓 결제 요청 (52,000원)'}</Text><Text style={s.small}>{post.title}</Text>
-        <Button label={payment ? (matching ? '참여 확정됨' : '결제 완료') : (matching ? '참여 확정' : '결제하기 ↗')} onPress={() => !payment && Alert.alert(matching ? '참여 확정' : '샘플 결제', '데모 화면의 상태를 변경할까요?', [{ text: '취소', style: 'cancel' }, { text: '확인', onPress: () => setCompleted(old => [...old, paymentKey]) }])} />
+        <Text style={s.link}>Ⅼ LinkPay</Text><Text style={s.postTitle}>티켓 결제 요청 (52,000원)</Text><Text style={s.small}>{post.title}</Text>
+        <Button label={payment ? '결제 완료' : '결제하기 ↗'} onPress={() => !payment && Alert.alert('샘플 결제', '데모 화면의 상태를 변경할까요?', [{ text: '취소', style: 'cancel' }, { text: '확인', onPress: () => setCompleted(old => [...old, paymentKey]) }])} />
       </View></View>
-      {payment && <View style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>{matching ? '참여가 확정되었어요!' : '결제 완료했습니다!'}</Text></View>}
+      {payment && <View style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>결제 완료했습니다!</Text></View>}
       {(messages[chat] ?? []).map((message, i) => <View key={i} style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>{message}</Text></View>)}
     </>;
   }
@@ -418,8 +554,21 @@ function FanLink({ logout }: { logout: () => void }) {
     return <>
       <Text style={s.title}>내 프로필</Text>
       <Image source={images.profileArt} style={s.profileCover} />
-      <View style={s.between}><View style={[s.inline, s.flex, { marginTop: -17 }]}><Avatar size={66} /><View style={s.flex}><Text style={s.detailTitle}>{nickname} <Text style={s.link}>☑</Text></Text><Text style={s.small}>삼성 라이온즈 팬 · Lv.4</Text></View></View><Pill label={editing ? '완료' : '프로필 편집'} icon="create-outline" onPress={() => setEditing(!editing)} /></View>
-      {editing && <TextInput accessibilityLabel="닉네임" style={s.input} value={nickname} onChangeText={setNickname} />}
+      <View style={s.between}><View style={[s.inline, s.flex, { marginTop: -17 }]}><Avatar size={66} source={profileImage} /><View style={s.flex}><Text style={s.detailTitle}>{nickname}{fanVerified ? ' ☑' : ''}</Text><Text style={s.small}>{clubs[fanClub].name} 팬 · 매너온도 36.5°C (샘플)</Text></View></View><Pill label={editing ? '완료' : '프로필 편집'} icon="create-outline" onPress={() => setEditing(!editing)} /></View>
+      {editing && <View style={s.section}>
+        <TextInput accessibilityLabel="닉네임" style={s.input} value={nickname} maxLength={24} onChangeText={setNickname} />
+        <View style={[s.inline, s.wrap]}><Pill label="프로필 사진 변경" icon="image-outline" onPress={pickProfileImage} /></View>
+      </View>}
+      <Section title="응원 구단과 팬 인증">
+        <Pills items={clubs.map(item => item.name)} value={clubs[fanClub].name} onChange={name => {
+          const next = clubs.findIndex(item => item.name === name);
+          if (next !== fanClub) { setFanClub(next); setFanVerified(false); }
+        }} />
+        <View style={[s.inline, s.wrap]}>
+          <Pill label={fanVerified ? '팬 인증 완료 (데모)' : '팬 인증하기 (데모)'} selected={fanVerified}
+            onPress={() => setFanVerified(true)} />
+        </View>
+      </Section>
       {stats()}
       <Section title="소개"><View style={s.panel}><Text style={s.padded}>삼성 라이온즈를 사랑하는 야구팬입니다!{'\n'}주로 직관 티켓 거래하고, 굿즈도 가끔 올려요⚾💙</Text></View></Section>
       <Section title="활동 요약" action={() => openActivity('게시글')}><View style={s.tileRow}>{(['거래 완료', '거래 중', '관심 게시물', '저장한 글']).map((label, i) => <Pressable key={label} style={s.tile} onPress={() => i < 2 ? push('history') : openActivity('저장한 글')}><Icon name={(['ticket-outline', 'swap-horizontal-outline', 'star-outline', 'bookmark-outline'] as const)[i]} color={blue} /><Text style={s.postTitle}>{[12, 8, 56, 24][i]}</Text><Text style={s.tiny}>{label}</Text></Pressable>)}</View></Section>
@@ -429,7 +578,7 @@ function FanLink({ logout }: { logout: () => void }) {
   }
   function security() {
     return <>
-      <Banner title={nickname + ' ☑'} hint="삼성 라이온즈 팬 · Lv.4" icon="shield-checkmark" />
+      <Banner title={nickname + (fanVerified ? ' ☑' : '')} hint={clubs[fanClub].name + ' 팬'} icon="shield-checkmark" />
       <Section title="계정 정보"><View style={s.panel}>
         <Row icon="person-outline" label="닉네임" value={nickname} onPress={() => { setEditing(true); push('profile'); }} />
         <Row icon="id-card-outline" label="아이디" value="fanlink_2471" onPress={() => info('아이디', 'fanlink_2471')} />
@@ -481,13 +630,16 @@ function FanLink({ logout }: { logout: () => void }) {
   function activities() {
     const items = activity === '저장한 글' ? posts.filter(item => saved.includes(item.id))
       : activity === '최근 본 글' ? viewed.flatMap(id => posts.filter(item => item.id === id))
-      : activity === '게시글' ? [...tradePosts, ...myPosts] : myPosts;
+      : activity === '게시글' ? ownPosts : myPosts;
     const filtered = items.filter(item => activityFilter === '전체' || item.group === activityFilter);
     return <>
       <Pills items={['게시글', '댓글', '거래내역', '저장한 글']} value={activity} onChange={value => value === '거래내역' ? push('history') : openActivity(value)} />
       <Pills items={['전체', ...categories.map(item => item.name)]} value={activityFilter} onChange={setActivityFilter} />
       {filtered.length ? filtered.map((item, i) => activity === '댓글' ? <View key={item.id} style={s.card}><Text style={s.body}>◌  {['네! 아직 2연석 모두 가능합니다!', '거래 방법은 링크페이로 진행하시면 됩니다!', '저도 참여하고 싶어요! 2명 가능합니다!', '혹시 사이즈 알 수 있을까요?'][i]}</Text><Pressable style={[s.inline, s.commentPreview]} onPress={() => openPost(item)}><Image source={item.image} style={s.thumb} /><View style={s.flex}><Text style={s.link}>{item.group}</Text><Text style={s.postTitle} numberOfLines={2}>{item.title}</Text><Text style={s.tiny}>{item.summary}</Text></View></Pressable></View> : postCard(item, true)) : <Empty />}
-      {activity === '게시글' && <View style={s.endButton}><Button label="▱  게시글 작성" onPress={() => push('trade-compose')} /></View>}
+      {activity === '게시글' && <View style={[s.inline, s.wrap]}>
+        <Pill label="거래 글쓰기" icon="create-outline" onPress={() => push('trade-compose')} />
+        <Pill label="모집 글쓰기" icon="create-outline" onPress={() => push('recruit-compose')} />
+      </View>}
     </>;
   }
   function history() {
@@ -546,22 +698,33 @@ function FanLink({ logout }: { logout: () => void }) {
     </>;
   }
   const isTab = tabScreens.includes(screen);
-  const isComposer = screen === 'chat' || screen === 'detail';
+  const matchingStatus = screen === 'chat' && chatPost.recruitment ? matches[chatPost.id] : undefined;
+  const isComposer = screen === 'detail' || (screen === 'chat' && matchingStatus !== '거절됨' && matchingStatus !== '참여 취소');
   const scroller = React.useRef<ScrollView>(null);
   const editDraft: TradeDraft | undefined = screen === 'trade-edit' && post.trade
     && (post.group === '티켓' || post.group === '굿즈') ? {
       group: post.group, club: post.club, title: post.title, body: post.summary,
       price: post.trade.price, imageUri: post.trade.imageUri, referencePrice: post.trade.referencePrice,
     } : undefined;
-  const content = screen === 'trade-compose' || screen === 'trade-edit' ? (
+  const content = screen === 'recruit-compose' ? (
+    <RecruitmentComposer initialGroup={isRecruitmentGroup(group) ? group : '직관메이트'} initialClub={club}
+      clubs={clubs.map(item => item.name)} onPublish={publishRecruitment} />
+  ) : screen === 'joined' ? joined() : screen === 'trade-compose' || screen === 'trade-edit' ? (
     <TradeComposer initialGroup={group === '굿즈' ? '굿즈' : '티켓'} initialClub={club}
       initialDraft={editDraft} clubs={clubs.map(item => item.name)} onPublish={publishTrade} />
   ) : screen === 'home' ? home() : screen === 'community' ? community() : screen === 'chats' ? chats() :
-    screen === 'my' ? my() : screen === 'detail' ? detail() : screen === 'chat' ? chatRoom() :
+    screen === 'my' ? my() : screen === 'detail' ? detail() : screen === 'chat' ? (matchingStatus ? matchingChat() : chatRoom()) :
     screen === 'profile' ? profile() : screen === 'security' ? security() : screen === 'notifications' ? notifications() :
     screen === 'settings' ? preferences() : screen === 'history' ? history() :
     screen === 'posts' || screen === 'comments' ? activities() :
     screen === 'notices' || screen === 'guide' || screen === 'help' ? support() : null;
+
+  const pinnedMatch = matchingStatus && chatPost.recruitment ? (
+    <Pressable accessibilityRole="button" accessibilityLabel="모집 상세 보기" onPress={() => openPost(chatPost)}>
+      <RecruitmentCard recruitment={chatPost.recruitment} compact={!compactChat} />
+    </Pressable>
+  ) : null;
+  const matchingActions = matchingStatus ? matchActions(matchingStatus) : null;
 
   return <SafeAreaView style={[s.safe, (isTab || screen === 'empty') && { backgroundColor: '#fff' }]}>
     <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -575,12 +738,16 @@ function FanLink({ logout }: { logout: () => void }) {
         </View>}
       </View>
       {(['chat', 'posts', 'comments', 'history'] as Screen[]).includes(screen) && <Image source={images.backdrop} style={s.backdrop} />}
+      {!compactChat && pinnedMatch && <View style={s.pinnedMatch}>{pinnedMatch}</View>}
       <ScrollView key={screen} ref={scroller} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
         style={s.flex} contentContainerStyle={s.content}>
         {!!titles[screen] && screen !== 'profile' && <Text style={s.title}>{titles[screen]}</Text>}
         {!!intro[screen] && <Text style={s.intro}>{intro[screen]}</Text>}
+        {compactChat && pinnedMatch}
         {content}
+        {compactChat && matchingActions}
       </ScrollView>
+      {!compactChat && matchingActions}
       {isComposer && <View style={s.composer}>
         <IconButton name={screen === 'chat' ? 'add-circle-outline' : 'image-outline'} label="첨부 메뉴" onPress={() => select('첨부', ['사진', '파일'])} />
         <TextInput style={[s.input, s.flex]} placeholder={screen === 'chat' ? '메시지를 입력하세요...' : '댓글을 입력하세요...'} value={draft} onChangeText={setDraft} onSubmitEditing={() => { send(); setTimeout(() => scroller.current?.scrollToEnd(), 80); }} returnKeyType="send" />
@@ -677,6 +844,8 @@ const s = StyleSheet.create({
   bubble: { flexShrink: 1, maxWidth: '76%', paddingHorizontal: 11, paddingVertical: 8, color: ink, backgroundColor: '#e9edf4', fontSize: 12, lineHeight: 18, borderRadius: 13 },
   bubbleMine: { color: 'white', backgroundColor: blue },
   paymentCard: { flexShrink: 1, maxWidth: '81%', backgroundColor: '#eaf3ff', padding: 10, borderRadius: 12, gap: 4 },
+  pinnedMatch: { paddingHorizontal: 16, paddingBottom: 8 },
+  matchActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#fff' },
   composer: { flexDirection: 'row', alignItems: 'center', gap: 7, padding: 8, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#edf0f5' },
   input: { backgroundColor: '#eef2f8', borderRadius: 20, paddingHorizontal: 13, paddingVertical: 8, fontSize: 13, color: ink, minHeight: 38 },
   send: { width: 36, height: 36, borderRadius: 18, backgroundColor: blue, justifyContent: 'center', alignItems: 'center' },
