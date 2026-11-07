@@ -6,8 +6,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import AuthGate from './AuthGate';
+
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
-type Screen = 'login' | 'home' | 'community' | 'chats' | 'my' | 'detail' | 'chat' |
+type Screen = 'home' | 'community' | 'chats' | 'my' | 'detail' | 'chat' |
   'profile' | 'security' | 'notifications' | 'settings' | 'posts' | 'comments' |
   'history' | 'notices' | 'guide' | 'help' | 'empty';
 type Group = '티켓' | '굿즈' | '카풀' | '직관메이트';
@@ -26,9 +28,6 @@ const images = {
   seongnam: require('./assets/seongnam.png'),
   pohang: require('./assets/pohang.png'),
   bucheon: require('./assets/bucheon.png'),
-  mark: require('./assets/mark.png'),
-  loginTop: require('./assets/login-top.png'),
-  loginBottom: require('./assets/login-bottom.png'),
   profileArt: require('./assets/profile-art.png'),
   backdrop: require('./assets/stadium-backdrop.png'),
   weather: require('./assets/weather-art.png'),
@@ -118,10 +117,10 @@ function Empty({ text = '표시할 항목이 없어요.' }: { text?: string }) {
 }
 
 export default function App() {
-  return <SafeAreaProvider><FanLink /></SafeAreaProvider>;
+  return <SafeAreaProvider><StatusBar barStyle="dark-content" /><AuthGate>{logout => <FanLink logout={logout} />}</AuthGate></SafeAreaProvider>;
 }
-function FanLink() {
-  const [stack, setStack] = useState<Screen[]>(['login']);
+function FanLink({ logout }: { logout: () => void }) {
+  const [stack, setStack] = useState<Screen[]>(['home']);
   const screen = stack[stack.length - 1];
   const push = (route: Screen) => setStack(old => [...old, route]);
   const replace = (route: Screen) => setStack([route]);
@@ -384,7 +383,7 @@ function FanLink() {
         <Row icon="phone-portrait-outline" label="로그인 기기 관리" hint="내 계정으로 로그인한 기기를 확인해요." onPress={() => info('로그인 기기 관리', '현재 기기에서 접속 중이에요.')} />
       </View></Section>
       <Section title="결제 및 연동"><View style={s.panel}><Row icon="card-outline" label="결제수단 관리" hint="카드, 계좌 등 결제수단 등록 및 관리" onPress={() => push('history')} /><Row icon="link-outline" label="연동 계정 관리" hint="SNS 계정 연동을 관리할 수 있어요." onPress={() => info('연동 계정 관리')} /></View></Section>
-      <Section title="계정 관리"><View style={s.panel}><Row icon="download-outline" label="데이터 다운로드" hint="내 활동 데이터를 확인해요." onPress={() => info('데이터 다운로드')} /><Row icon="log-out-outline" label="로그아웃" onPress={() => replace('login')} /><Row icon="person-remove-outline" label="계정 탈퇴" danger onPress={() => info('계정 탈퇴')} /></View></Section>
+      <Section title="계정 관리"><View style={s.panel}><Row icon="download-outline" label="데이터 다운로드" hint="내 활동 데이터를 확인해요." onPress={() => info('데이터 다운로드')} /><Row icon="log-out-outline" label="로그아웃" onPress={logout} /><Row icon="person-remove-outline" label="계정 탈퇴" danger onPress={() => info('계정 탈퇴')} /></View></Section>
     </>;
   }
   function notifications() {
@@ -486,18 +485,6 @@ function FanLink() {
       <View style={[s.between, s.wrap]}>{!guide && <Pill label="내 문의 내역" icon="receipt-outline" onPress={() => info('내 문의 내역', '등록된 문의가 없어요.')} />}<Button label="✎  1:1 문의하기" onPress={() => guide ? push('help') : info('1:1 문의하기', '위 목록에서 문의 유형을 선택해 주세요.')} /></View>
     </>;
   }
-  function login() {
-    return <View style={s.login}>
-      <Image source={images.loginTop} style={s.loginTop} resizeMode="contain" />
-      <Image source={images.loginBottom} style={s.loginBottom} resizeMode="stretch" />
-      <ScrollView contentContainerStyle={s.loginContent} showsVerticalScrollIndicator={false}>
-        <Image source={images.mark} style={s.logo} resizeMode="contain" />
-        <Text style={s.loginTitle}>FANLINK</Text>
-        <Text style={s.loginCopy}>티켓 예매부터 팬 활동까지,{'\n'}FANLINK에서 한 번에</Text>
-        <View style={s.loginActions}><Button label="●   카카오로 로그인" color="#ffe500" textColor="#151009" onPress={() => replace('home')} /><Button label="N   네이버로 로그인" color="#04c442" onPress={() => replace('home')} /></View>
-      </ScrollView>
-    </View>;
-  }
   const isTab = tabScreens.includes(screen);
   const isComposer = screen === 'chat' || screen === 'detail';
   const scroller = React.useRef<ScrollView>(null);
@@ -509,8 +496,7 @@ function FanLink() {
     screen === 'notices' || screen === 'guide' || screen === 'help' ? support() : null;
 
   return <SafeAreaView style={[s.safe, (isTab || screen === 'empty') && { backgroundColor: '#fff' }]}>
-    <StatusBar barStyle="dark-content" />
-    {screen === 'login' ? login() : <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={[s.header, !isTab && screen !== 'empty' && s.subHeader]}>
         {!isTab && screen !== 'empty' && <IconButton name="chevron-back" label="뒤로 가기" onPress={back} />}
         <Text style={[s.wordmark, !isTab && screen !== 'empty' && s.centerWordmark]}>FANLINK</Text>
@@ -533,7 +519,7 @@ function FanLink() {
         <Pressable accessibilityRole="button" accessibilityLabel="보내기" style={s.send} onPress={() => { send(); setTimeout(() => scroller.current?.scrollToEnd(), 80); }}><Icon name="send" size={17} color="white" /></Pressable>
       </View>}
       {(isTab || screen === 'empty') && <View style={s.tabbar}>{tabScreens.map((tab, i) => <Pressable key={tab} accessibilityRole="tab" accessibilityLabel={tabLabels[i]} accessibilityState={{ selected: screen === tab }} style={s.tab} onPress={() => replace(tab)}><Icon name={screen === tab ? tabIcons[i] : (tabIcons[i] + '-outline') as IconName} color={screen === tab ? '#0b111a' : '#59616c'} size={24} /></Pressable>)}</View>}
-    </KeyboardAvoidingView>}
+    </KeyboardAvoidingView>
   </SafeAreaView>;
 }
 
@@ -631,13 +617,5 @@ const s = StyleSheet.create({
   squareIcon: { width: 46, height: 46, borderRadius: 9, backgroundColor: '#eaf3ff', justifyContent: 'center', alignItems: 'center' },
   complete: { color: '#24814f', backgroundColor: '#e4f5e9', borderRadius: 9, fontSize: 9, padding: 3, textAlign: 'center' },
   endButton: { alignSelf: 'flex-end' },
-  login: { flex: 1, overflow: 'hidden', backgroundColor: '#f8f9fc', justifyContent: 'center' },
-  loginTop: { width: '48%', height: '21%', position: 'absolute', top: 0, left: 0 },
-  loginBottom: { width: '100%', height: '32%', position: 'absolute', bottom: 0 },
-  loginContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28, paddingTop: 16, paddingBottom: 64 },
-  logo: { width: 110, height: 82 },
-  loginTitle: { textAlign: 'center', color: '#0b1737', fontSize: 44, fontWeight: '900', letterSpacing: -.8 },
-  loginCopy: { marginTop: 8, textAlign: 'center', lineHeight: 21, color: '#535b6d', fontSize: 14 },
-  loginActions: { marginTop: 53, width: '100%', gap: 10 },
 });
 
