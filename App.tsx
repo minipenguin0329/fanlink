@@ -367,7 +367,7 @@ function FanLink({ logout }: { logout: () => void }) {
     return <>
       <View style={[s.between, s.wrap]}>
         <Text style={[s.title, s.shrink]}>커뮤니티</Text>
-        <Pill label={isRecruitmentGroup(group) ? '모집 글쓰기' : '거래 글쓰기'} icon="create-outline"
+        <IconButton name="create-outline" label={isRecruitmentGroup(group) ? '모집 글쓰기' : '거래 글쓰기'}
           onPress={() => push(isRecruitmentGroup(group) ? 'recruit-compose' : 'trade-compose')} />
       </View>
       <View style={s.tileRow}>{clubs.map((c, i) => <Pressable accessibilityState={{ selected: i === club }} key={c.name} onPress={() => setClub(i)} style={[s.tile, { backgroundColor: ['#eaf2fc', '#e7f6fa', '#fbecec'][i] }, i === club && s.selectedTile]}><Image source={c.logo} style={s.clubLogo} /><Text style={s.rowTitle}>{c.name}</Text></Pressable>)}</View>
@@ -708,10 +708,10 @@ function FanLink({ logout }: { logout: () => void }) {
     } : undefined;
   const content = screen === 'recruit-compose' ? (
     <RecruitmentComposer initialGroup={isRecruitmentGroup(group) ? group : '직관메이트'} initialClub={club}
-      clubs={clubs.map(item => item.name)} onPublish={publishRecruitment} />
+      onPublish={publishRecruitment} />
   ) : screen === 'joined' ? joined() : screen === 'trade-compose' || screen === 'trade-edit' ? (
     <TradeComposer initialGroup={group === '굿즈' ? '굿즈' : '티켓'} initialClub={club}
-      initialDraft={editDraft} clubs={clubs.map(item => item.name)} onPublish={publishTrade} />
+      initialDraft={editDraft} onPublish={publishTrade} />
   ) : screen === 'home' ? home() : screen === 'community' ? community() : screen === 'chats' ? chats() :
     screen === 'my' ? my() : screen === 'detail' ? detail() : screen === 'chat' ? (matchingStatus ? matchingChat() : chatRoom()) :
     screen === 'profile' ? profile() : screen === 'security' ? security() : screen === 'notifications' ? notifications() :
