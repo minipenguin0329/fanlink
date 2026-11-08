@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { composerStyles } from './ComposerUI';
 
 export type RecruitmentGroup = '직관메이트' | '카풀';
 export type RecruitmentStatus = '모집 중' | '모집 완료' | '취소';
@@ -41,16 +42,16 @@ export function RecruitmentCard({ recruitment, compact = false }: {
     <View style={[styles.card, compact && styles.compact]}>
       <View style={styles.cardHeader}>
         <Ionicons name={carpool ? 'car-sport-outline' : 'people-outline'} size={18} color="#075cf1" />
-        <Text style={[styles.label, styles.shrink]}>{carpool ? '이동 경로' : '직관 모임 정보'}</Text>
+        <Text style={[composerStyles.label, styles.shrink]}>{carpool ? '이동 경로' : '직관 모임 정보'}</Text>
         <Text style={styles.status}>{status}</Text>
       </View>
       <Text style={styles.copy} numberOfLines={compact ? 1 : undefined}>
         {carpool ? [departure, route, destination].filter(Boolean).join(' → ') : departure}
       </Text>
-      <Text style={styles.hint} numberOfLines={compact ? 1 : undefined}>
+      <Text style={composerStyles.hint} numberOfLines={compact ? 1 : undefined}>
         {carpool ? '출발 ' + departureAt : '경기 ' + gameAt} · {capacity}명
       </Text>
-      {carpool && <Text style={styles.hint} numberOfLines={compact ? 1 : undefined}>경기 {gameAt}</Text>}
+      {carpool && <Text style={composerStyles.hint} numberOfLines={compact ? 1 : undefined}>경기 {gameAt}</Text>}
     </View>
   );
 }
@@ -58,14 +59,11 @@ export function RecruitmentCard({ recruitment, compact = false }: {
 type Field = 'title' | 'gameAt' | 'capacity' | 'departure' | 'destination' | 'departureAt' | 'route' | 'conditions';
 type Form = Record<Field, string>;
 
-export default function RecruitmentComposer({ initialGroup, initialClub, clubs, onPublish }: {
+export default function RecruitmentComposer({ initialGroup: group, initialClub: club, onPublish }: {
   initialGroup: RecruitmentGroup;
   initialClub: number;
-  clubs: string[];
   onPublish: (draft: RecruitmentDraft) => void;
 }) {
-  const [group, setGroup] = useState(initialGroup);
-  const [club, setClub] = useState(initialClub);
   const [form, setForm] = useState<Form>({
     title: '', gameAt: '', capacity: '', departure: '', destination: '', departureAt: '', route: '', conditions: '',
   });
@@ -86,12 +84,12 @@ export default function RecruitmentComposer({ initialGroup, initialClub, clubs, 
   function field(key: Field, label: string, placeholder: string, maxLength: number) {
     return (
       <View style={styles.field}>
-        <Text style={styles.label}>{label}</Text>
+        <Text style={composerStyles.label}>{label}</Text>
         <TextInput accessibilityLabel={label} value={form[key]} placeholder={placeholder} maxLength={maxLength}
           keyboardType={key === 'capacity' ? 'number-pad' : 'default'} multiline={key === 'conditions'}
-          style={[styles.input, key === 'conditions' && styles.conditions]}
+          style={[composerStyles.input, key === 'conditions' && styles.conditions]}
           onChangeText={value => setForm(old => ({ ...old, [key]: value }))} />
-        {submitted && !!errors[key] && <Text accessibilityRole="alert" style={styles.error}>{errors[key]}</Text>}
+        {submitted && !!errors[key] && <Text accessibilityRole="alert" style={composerStyles.error}>{errors[key]}</Text>}
       </View>
     );
   }
@@ -109,59 +107,35 @@ export default function RecruitmentComposer({ initialGroup, initialClub, clubs, 
   }
 
   return (
-    <View style={styles.form}>
-      <Text accessibilityRole="header" style={styles.title}>{carpool ? '카풀 모집 글쓰기' : '메이트 모집 글쓰기'}</Text>
-      <Text style={styles.hint}>등록한 모집 글은 현재 앱 실행 중에 표시돼요.</Text>
-      <Text style={styles.label}>모집 유형</Text>
-      <View style={styles.choices}>
-        {(['직관메이트', '카풀'] as const).map(item => (
-          <Pressable key={item} accessibilityRole="radio" accessibilityState={{ checked: group === item }}
-            style={[styles.choice, group === item && styles.selected]} onPress={() => setGroup(item)}>
-            <Text style={[styles.label, styles.shrink]}>{item}</Text>
-          </Pressable>
-        ))}
+    <View style={composerStyles.form}>
+      <Text accessibilityRole="header" style={composerStyles.title}>{carpool ? '카풀 모집 글쓰기' : '메이트 모집 글쓰기'}</Text>
+      <View style={composerStyles.panel}>
+        {field('title', '제목', carpool ? '예) 동대구역에서 경기장까지 같이 가요' : '예) 주말 경기 같이 응원해요', 80)}
+        {field('gameAt', '경기 일정', 'YYYY-MM-DD HH:mm', 16)}
+        {field('capacity', '모집 인원', '예) 2', 2)}
+        {field('departure', carpool ? '출발지' : '만남 장소', carpool ? '예) 동대구역 2번 출구' : '예) 경기장 3번 게이트', 100)}
       </View>
-      <Text style={styles.label}>구단</Text>
-      <View style={styles.choices}>
-        {clubs.map((name, index) => (
-          <Pressable key={name} accessibilityRole="radio" accessibilityState={{ checked: index === club }}
-            style={[styles.choice, index === club && styles.selected]} onPress={() => setClub(index)}>
-            <Text style={[styles.label, styles.shrink]}>{name}</Text>
-          </Pressable>
-        ))}
+
+      <View style={composerStyles.panel}>
+        {carpool && <>
+          {field('destination', '목적지', '예) 대구 삼성라이온즈파크', 100)}
+          {field('departureAt', '출발 일시', 'YYYY-MM-DD HH:mm', 16)}
+          {field('route', '경유지 또는 이동 경로 (선택)', '예) 수성IC 경유', 120)}
+        </>}
+        {field('conditions', '세부 조건', '예) 경기 시작 30분 전에 만나요.', 1000)}
       </View>
-      {field('title', '제목', carpool ? '예) 동대구역에서 경기장까지 같이 가요' : '예) 주말 경기 같이 응원해요', 80)}
-      {field('gameAt', '경기 일정', 'YYYY-MM-DD HH:mm', 16)}
-      {field('capacity', '모집 인원', '예) 2', 2)}
-      {field('departure', carpool ? '출발지' : '만남 장소', carpool ? '예) 동대구역 2번 출구' : '예) 경기장 3번 게이트', 100)}
-      {carpool && <>
-        {field('destination', '목적지', '예) 대구 삼성라이온즈파크', 100)}
-        {field('departureAt', '출발 일시', 'YYYY-MM-DD HH:mm', 16)}
-        {field('route', '경유지 또는 이동 경로 (선택)', '예) 수성IC 경유', 120)}
-      </>}
-      {field('conditions', '세부 조건', '예) 경기 시작 30분 전에 만나요.', 1000)}
-      <Pressable accessibilityRole="button" style={styles.publish} onPress={publish}>
-        <Text style={styles.publishText}>모집 글 등록</Text>
+
+      <Pressable accessibilityRole="button" style={composerStyles.publish} onPress={publish}>
+        <Text style={composerStyles.publishText}>모집 글 등록</Text>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  form: { minWidth: 0, gap: 10 },
   field: { minWidth: 0, gap: 5 },
-  title: { fontSize: 25, fontWeight: '900', color: '#101623' },
-  label: { fontSize: 13, fontWeight: '700', color: '#101623' },
   copy: { fontSize: 13, color: '#101623' },
-  hint: { fontSize: 12, color: '#626b7a' },
-  error: { fontSize: 12, color: '#ad2336' },
-  choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  choice: { maxWidth: '100%', borderColor: '#d9e2ef', borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9, backgroundColor: '#fff' },
-  selected: { borderColor: '#82b4ff', backgroundColor: '#e9f3ff' },
-  input: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11, borderWidth: 1, borderColor: '#d9e2ef', backgroundColor: '#fff', color: '#101623' },
   conditions: { minHeight: 92, textAlignVertical: 'top' },
-  publish: { marginTop: 8, minHeight: 45, justifyContent: 'center', alignItems: 'center', padding: 10, backgroundColor: '#075cf1', borderRadius: 11 },
-  publishText: { color: '#fff', fontWeight: '800', fontSize: 14, textAlign: 'center' },
   card: { minWidth: 0, gap: 5, backgroundColor: '#eef5ff', borderColor: '#d8e7fb', borderWidth: 1, borderRadius: 12, padding: 11 },
   compact: { paddingVertical: 7 },
   cardHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
