@@ -649,7 +649,9 @@ function FanLink({ logout }: { logout: () => void }) {
   function home() {
     const orderedClubs = [clubs[fanClub], ...clubs.filter((_, index) => index !== fanClub)];
     return <>
-      <Text style={s.small}>{serverStatus} · 서버 데이터가 0개일 때 아래 샘플 화면은 미리보기입니다.</Text>
+      {serverStatus.startsWith('조회 실패') && (
+          <Text style={s.small}>{serverStatus}</Text>
+      )}
       <View style={[s.banner, s.weather]}>
         <Icon name="partly-sunny" color="#fff49a" size={36} />
         <View style={s.flex}>
@@ -668,33 +670,6 @@ function FanLink({ logout }: { logout: () => void }) {
           <View style={s.matchTime}><Text style={s.rowTitle}>▣  {c.date}</Text><Text style={s.small}>◷  {c.time}</Text>{!!c.place && <Text style={s.small}>⌖  {c.place}</Text>}</View>
         </View>
       </View>)}</Section>
-
-      <Section title="서버 게시물">
-        <View style={s.panel}>
-          <Text style={s.small}>{serverStatus}</Text>
-
-          {serverPosts.slice(0, 5).map(item => {
-            const groupName: Record<string, string> = {
-              TICKET: '티켓',
-              GOODS: '굿즈',
-              CARPOOL: '카풀',
-              MATE: '직관메이트',
-            };
-
-            return (
-                <Row
-                    key={`server-${item.id}`}
-                    icon="document-text-outline"
-                    label={`[${groupName[item.category] ?? item.category}] ${item.title}`}
-                    hint={`${item.authorNickname} · 게시물 #${item.id}`}
-                    onPress={() =>
-                        Alert.alert(item.title, item.content)
-                    }
-                />
-            );
-          })}
-        </View>
-      </Section>
 
       <Section title="🔥 인기게시물" action={() => replace('community')}>
         <View style={s.panel}>
