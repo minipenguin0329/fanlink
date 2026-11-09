@@ -85,6 +85,22 @@ public class TradeController {
         );
     }
 
+    // 판매자: 결제 완료 후 티켓 전달
+    @PatchMapping("/trades/{tradeId}/deliver")
+    public TradeResponse deliver(
+            @PathVariable Long tradeId,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        return tradeService.markDelivered(tradeId, currentUserId(principal));
+    }
+
+    // 구매자: 티켓 수령 확인
+    @PatchMapping("/trades/{tradeId}/confirm-receipt")
+    public TradeResponse confirmReceipt(
+            @PathVariable Long tradeId,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        return tradeService.confirmReceipt(tradeId, currentUserId(principal));
+    }
+
     // 구매자가 거래 취소
     @PatchMapping("/trades/{tradeId}/cancel")
     public TradeResponse cancel(

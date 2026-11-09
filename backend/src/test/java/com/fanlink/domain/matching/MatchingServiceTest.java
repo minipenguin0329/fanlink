@@ -30,6 +30,9 @@ class MatchingServiceTest {
     PostRepository postRepository;
 
     @Mock
+    MatchingPostLockRepository matchingPostLockRepository;
+
+    @Mock
     UserRepository userRepository;
 
     @InjectMocks
@@ -52,6 +55,9 @@ class MatchingServiceTest {
 
         when(matchingRepository.findById(100L))
                 .thenReturn(Optional.of(request));
+        when(post.getStatus()).thenReturn(com.fanlink.domain.post.PostStatus.ACTIVE);
+        when(matchingPostLockRepository.findByIdForUpdate(10L))
+                .thenReturn(Optional.of(post));
 
         MatchingResponse response =
                 matchingService.accept(100L, 1L);

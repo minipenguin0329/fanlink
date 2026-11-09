@@ -265,6 +265,38 @@ public class TradeService {
         return TradeResponse.from(trade);
     }
 
+    // 판매자가 결제 완료된 티켓을 전달했다고 표시
+    @Transactional
+    public TradeResponse markDelivered(Long tradeId, Long sellerId) {
+        requireLogin(sellerId);
+        Trade trade = paymentTradeLockRepository.findByIdForUpdate(tradeId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "거래를 찾을 수 없습니다."));
+        verifySeller(trade, sellerId);
+        if (trade.getStatus() != TradeStatus.PAID) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "결제 완료 상태에서만 전달 처리할 수 있습니다.");
+        }
+        trade.changeStatus(TradeStatus.DELIVERED);
+        return TradeResponse.from(trade);
+    }
+
+    // 구매자가 실제 수령을 확인하여 거래 완료 처리
+    @Transactional
+    public TradeResponse confirmReceipt(Long tradeId, Long buyerId) {
+        requireLogin(buyerId);
+        Trade trade = paymentTradeLockRepository.findByIdForUpdate(tradeId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "거래를 찾을 수 없습니다."));
+        verifyBuyer(trade, buyerId);
+        if (trade.getStatus() != TradeStatus.DELIVERED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "티켓 전달 후에만 수령 확정할 수 있습니다.");
+        }
+        trade.changeStatus(TradeStatus.COMPLETED);
+        return TradeResponse.from(trade);
+    }
+
     // 구매자 거래 취소
 
     @Transactional

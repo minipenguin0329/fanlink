@@ -18,6 +18,7 @@ import java.util.List;
 public class ChatController {
 
     private final ChatService chatService;
+    private final ChatMessageBroadcaster chatMessageBroadcaster;
 
     // 현재 로그인한 사용자 ID
     private Long currentUserId(UserPrincipal principal) {
@@ -61,11 +62,14 @@ public class ChatController {
             @RequestBody ChatMessageRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
 
-        return chatService.sendMessage(
-                roomId,
-                currentUserId(principal),
-                request.content()
-        );
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "메시지 내용이 필요합니다.");
+        }
+        // Proxy transaction commits before we notify WebSocket listeners.
+        ChatService.ChatDelivery delivery = chatService.sendForWebSocket(
+                roomId, currentUserId(principal), request.content());
+        chatMessageBroadcaster.broadcast(delivery);
+        return delivery.message();
     }
 
     // 최근 메시지 조회

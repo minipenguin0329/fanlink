@@ -7,7 +7,6 @@ import lombok.RequiredArgsConstructor;
 
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -23,7 +22,7 @@ import java.security.Principal;
 public class ChatStompController {
 
     private final ChatService chatService;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final ChatMessageBroadcaster chatMessageBroadcaster;
 
     @MessageMapping("/chat.send")
     public void send(
@@ -53,22 +52,6 @@ public class ChatStompController {
                         request.content()
                 );
 
-        ChatMessageResponse response = delivery.message();
-
-        // 게시글 작성자에게 전송
-        messagingTemplate.convertAndSendToUser(
-                delivery.hostId().toString(),
-                "/queue/chat",
-                response
-        );
-
-        // 채팅에 참여한 상대방에게 전송
-        if (!delivery.hostId().equals(delivery.participantId())) {
-            messagingTemplate.convertAndSendToUser(
-                    delivery.participantId().toString(),
-                    "/queue/chat",
-                    response
-            );
-        }
+        chatMessageBroadcaster.broadcast(delivery);
     }
 }

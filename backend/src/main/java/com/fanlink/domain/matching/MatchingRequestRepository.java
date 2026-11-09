@@ -19,6 +19,8 @@ public interface MatchingRequestRepository
             Long applicantId
     );
 
+    long countByPost_IdAndStatusIn(Long postId, List<MatchStatus> statuses);
+
     List<MatchingRequest> findByPost_IdOrderByCreatedAtDesc(
             Long postId
     );

@@ -24,6 +24,7 @@ public class MatchingService {
 
     private final MatchingRequestRepository matchingRepository;
     private final PostRepository postRepository;
+    private final MatchingPostLockRepository matchingPostLockRepository;
     private final UserRepository userRepository;
 
     // 로그인 확인
@@ -188,6 +189,14 @@ public class MatchingService {
         MatchingRequest request = findRequest(requestId);
         verifyHost(request, hostId);
 
+        // Serialize accept operations on the same post, preventing overbooking.
+        Post post = matchingPostLockRepository.findByIdForUpdate(request.getPost().getId())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."));
+        if (post.getStatus() != PostStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "모집 중인 게시글이 아닙니다.");
+        }
+
         if (request.getStatus() != MatchStatus.REQUESTED) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
@@ -195,6 +204,16 @@ public class MatchingService {
             );
         }
 
+        // quantity is the recruitment capacity when populated by the post owner.
+        // Null means capacity was not supplied, not zero capacity.
+        Integer capacity = post.getQuantity();
+        if (capacity != null && capacity > 0) {
+            long reserved = matchingRepository.countByPost_IdAndStatusIn(
+                    post.getId(), List.of(MatchStatus.HOST_ACCEPTED, MatchStatus.CONFIRMED));
+            if (reserved >= capacity) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "모집 정원이 마감되었습니다.");
+            }
+        }
         request.changeStatus(MatchStatus.HOST_ACCEPTED);
 
         return MatchingResponse.from(request);

@@ -21,6 +21,7 @@ class MatchingFlowAdditionalTest {
 
     @Mock MatchingRequestRepository matchingRepository;
     @Mock PostRepository postRepository;
+    @Mock MatchingPostLockRepository matchingPostLockRepository;
     @Mock UserRepository userRepository;
     @InjectMocks MatchingService matchingService;
 
@@ -36,6 +37,8 @@ class MatchingFlowAdditionalTest {
 
         MatchingRequest request = new MatchingRequest(post, applicant);
         when(matchingRepository.findById(100L)).thenReturn(Optional.of(request));
+        when(post.getStatus()).thenReturn(com.fanlink.domain.post.PostStatus.ACTIVE);
+        when(matchingPostLockRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(post));
 
         MatchingResponse accepted = matchingService.accept(100L, 1L);
         assertEquals(MatchStatus.HOST_ACCEPTED, accepted.status());
