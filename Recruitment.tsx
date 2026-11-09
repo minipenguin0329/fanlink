@@ -46,12 +46,13 @@ export function RecruitmentCard({ recruitment, compact = false }: {
         <Text style={styles.status}>{status}</Text>
       </View>
       <Text style={styles.copy} numberOfLines={compact ? 1 : undefined}>
-        {carpool ? [departure, route, destination].filter(Boolean).join(' → ') : departure}
+        {(carpool ? [departure, route, destination].filter(Boolean).join(' → ') : departure) || '상세 정보는 게시글 본문을 확인하세요.'}
       </Text>
       <Text style={composerStyles.hint} numberOfLines={compact ? 1 : undefined}>
-        {carpool ? '출발 ' + departureAt : '경기 ' + gameAt} · {capacity}명
+        {carpool ? (departureAt ? '출발 ' + departureAt : '출발 일시 미등록') : (gameAt ? '경기 ' + gameAt : '경기 일정 미등록')}
+        {' · '}{capacity > 0 ? `${capacity}명` : '모집 인원 미등록'}
       </Text>
-      {carpool && <Text style={composerStyles.hint} numberOfLines={compact ? 1 : undefined}>경기 {gameAt}</Text>}
+      {carpool && gameAt !== '' && <Text style={composerStyles.hint} numberOfLines={compact ? 1 : undefined}>경기 {gameAt}</Text>}
     </View>
   );
 }
@@ -62,12 +63,14 @@ type Form = Record<Field, string>;
 export default function RecruitmentComposer({ initialGroup: group, initialClub: club, onPublish }: {
   initialGroup: RecruitmentGroup;
   initialClub: number;
-  onPublish: (draft: RecruitmentDraft) => void;
+  onPublish: (draft: RecruitmentDraft) => void | Promise<void>;
 }) {
   const [form, setForm] = useState<Form>({
     title: '', gameAt: '', capacity: '', departure: '', destination: '', departureAt: '', route: '', conditions: '',
   });
   const [submitted, setSubmitted] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState('');
   const published = useRef(false);
   const carpool = group === '카풀';
   const capacity = Number(form.capacity);
@@ -94,16 +97,25 @@ export default function RecruitmentComposer({ initialGroup: group, initialClub: 
     );
   }
 
-  function publish() {
+  async function publish() {
     setSubmitted(true);
     if (published.current || Object.values(errors).some(Boolean)) return;
     published.current = true;
-    onPublish({
-      group, club, capacity, title: form.title.trim(), gameAt: form.gameAt.trim(),
-      departure: form.departure.trim(), destination: carpool ? form.destination.trim() : '',
-      departureAt: carpool ? form.departureAt.trim() : '', route: carpool ? form.route.trim() : '',
-      conditions: form.conditions.trim(),
-    });
+    setPublishing(true);
+    setPublishError('');
+    try {
+      await onPublish({
+        group, club, capacity, title: form.title.trim(), gameAt: form.gameAt.trim(),
+        departure: form.departure.trim(), destination: carpool ? form.destination.trim() : '',
+        departureAt: carpool ? form.departureAt.trim() : '', route: carpool ? form.route.trim() : '',
+        conditions: form.conditions.trim(),
+      });
+    } catch (error) {
+      published.current = false;
+      setPublishError(error instanceof Error ? error.message : '등록에 실패했습니다.');
+    } finally {
+      setPublishing(false);
+    }
   }
 
   return (
@@ -125,8 +137,9 @@ export default function RecruitmentComposer({ initialGroup: group, initialClub: 
         {field('conditions', '세부 조건', '예) 경기 시작 30분 전에 만나요.', 1000)}
       </View>
 
-      <Pressable accessibilityRole="button" style={composerStyles.publish} onPress={publish}>
-        <Text style={composerStyles.publishText}>모집 글 등록</Text>
+      {!!publishError && <Text accessibilityRole="alert" style={composerStyles.error}>{publishError}</Text>}
+      <Pressable accessibilityRole="button" disabled={publishing} style={[composerStyles.publish, publishing && {opacity:0.5}]} onPress={() => {void publish();}}>
+        <Text style={composerStyles.publishText}>{publishing ? '서버에 등록 중…' : '모집 글 등록'}</Text>
       </Pressable>
     </View>
   );

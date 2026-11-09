@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert, BackHandler, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View,
@@ -7,7 +7,22 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+
 import AuthGate from './AuthGate';
+
+
+
+import {
+  getBackendPosts, getFanlinkApiUrl, postApi, matchingApi, chatApi, tradeApi,
+  paymentApi, imageApi, ticketPriceApi, userApi,
+  type BackendPost, type PostStatus, type MatchingResponse, type MatchingStatus,
+  type ChatRoomResponse, type ChatMessageResponse, type TradeResponse,
+  type PaymentOrderResponse, type UserResponse, type Team,
+} from './integration/fanlinkApi';
+import { clearBackendJwt, readBackendJwt, requireBackendJwt } from './integration/fanlinkSession';
+import { connectFanlinkChat } from './integration/fanlinkRealtime';
+import { mapBackendPostBasic } from './integration/fanlinkPostAdapter';
+
 import TradeComposer, { type TradeDraft } from './TradeComposer';
 import RecruitmentComposer, {
   RecruitmentCard, isRecruitmentGroup, type Recruitment, type RecruitmentDraft, type RecruitmentStatus,
@@ -46,8 +61,36 @@ const categories: { name: Group; icon: IconName }[] = [
   { name: '티켓', icon: 'ticket' }, { name: '굿즈', icon: 'bag-handle' },
   { name: '카풀', icon: 'car-sport' }, { name: '직관메이트', icon: 'people' },
 ];
-type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment };
+type Post = {
+  id: number; group: Group; club: number; title: string; summary: string;
+  image: ImageSourcePropType; likes: number; replies: number;
+  trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string };
+  recruitment?: Recruitment;
+  /** Set ONLY for posts returned from the server, never demo samples. */
+  backendId?: number;
+  authorId?: number;
+  backendStatus?: PostStatus;
+};
 type MatchStatus = '신청 중' | '호스트 동의' | '상호 동의' | '참여 확정' | '참여 취소' | '거절됨';
+const matchStatusNames: Record<MatchingStatus, MatchStatus> = {
+  REQUESTED: '신청 중', HOST_ACCEPTED: '호스트 동의', CONFIRMED: '참여 확정',
+  REJECTED: '거절됨', CANCELED: '참여 취소',
+};
+const displayMatchStatus = (status: MatchingStatus): MatchStatus => matchStatusNames[status];
+const serverTeams: Team[] = ['SAMSUNG_LIONS', 'DAEGU_FC', 'POHANG_STEELERS'];
+/** Missing scheduling details are not represented by fabricated dates. */
+function serverRecruitment(post: BackendPost, group: '카풀' | '직관메이트', club: number): Recruitment {
+  const field = (key: string) => post.content.split('\n').find(line => line.startsWith(`${key}: `))?.slice(key.length + 2) ?? '';
+  return {
+    group, club, title: post.title,
+    gameAt: field('경기 일정'), capacity: post.quantity ?? 0,
+    departure: field('만남 장소') || field('출발지'), destination: field('목적지'),
+    departureAt: field('출발 일시'), route: field('경유 경로'),
+    conditions: field('참여 조건') || post.content,
+    author: post.authorNickname,
+    status: post.status === 'ACTIVE' ? '모집 중' : '모집 완료',
+  };
+}
 const samplePosts: Post[] = [
   { id: 1, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 vs 키움 히어로즈 (11/8 토)', summary: '3루 내야지정석 13블록 8열 12, 13번 (연석 2매)\n정가 26,000원/매 (총 52,000원)', image: images.stadium, likes: 24, replies: 7 },
   { id: 2, group: '티켓', club: 0, title: '[정가양도] 삼성 라이온즈 vs SSG 랜더스 (11/9 일)', summary: '1루 내야지정석 5블록 10열 5번 (1매)\n정가 28,000원', image: images.stadium, likes: 18, replies: 4 },
@@ -126,9 +169,53 @@ function Empty({ text = '표시할 항목이 없어요.' }: { text?: string }) {
 }
 
 export default function App() {
-  return <SafeAreaProvider><StatusBar barStyle="dark-content" /><AuthGate>{logout => <FanLink logout={logout} />}</AuthGate></SafeAreaProvider>;
+  return <SafeAreaProvider><StatusBar barStyle="dark-content" /><AuthGate>{logout =>
+    <FanLink logout={() => { void clearBackendJwt().finally(() => logout()); }} />
+  }</AuthGate></SafeAreaProvider>;
 }
 function FanLink({ logout }: { logout: () => void }) {
+  const [backendJwt, setBackendJwt] = useState<string | null>(null);
+
+
+
+  useEffect(() => {
+    let active = true;
+    getBackendPosts().then(posts => {
+      if (!active) return;
+      setServerPosts(posts);
+      setServerStatus(posts.length === 0 ? '서버에 등록된 게시물이 없습니다.' : `서버 게시물 ${posts.length}개 조회 완료`);
+    }).catch(error => {
+      if (active) setServerStatus(`조회 실패: ${String(error)}`);
+    });
+    readBackendJwt().then(async token => {
+      if (!token || !active) return;
+      const user = await userApi.me(token);
+      if (active) { setBackendJwt(token); setBackendUser(user); }
+    }).catch(() => { /* Expired or missing OAuth token: stay in demo mode. */ });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!backendJwt) return;
+    let active = true;
+    void Promise.all([chatApi.myRooms(backendJwt), tradeApi.mine(backendJwt)]).then(([rooms, trades]) => {
+      if (active) { setLiveRooms(rooms); setLiveTrades(trades); }
+    }).catch(() => { /* Manual refresh remains available. */ });
+    let client: ReturnType<typeof connectFanlinkChat> | undefined;
+    try {
+      client = connectFanlinkChat(backendJwt, message => {
+      if (!active) return;
+      setLiveMessages(old => {
+        const previous = old[message.roomId] ?? [];
+        if (previous.some(item => item.messageId === message.messageId)) return old;
+        return { ...old, [message.roomId]: [...previous, message] };
+      });
+      });
+    } catch { /* REST chat remains available if STOMP setup fails. */ }
+    return () => { active = false; if (client) void client.deactivate(); };
+  }, [backendJwt]);
+
+
   const { height, fontScale } = useWindowDimensions();
   const compactChat = height < 650 || fontScale > 1.35;
   const [stack, setStack] = useState<Screen[]>(['home']);
@@ -155,9 +242,60 @@ function FanLink({ logout }: { logout: () => void }) {
   const [tradePosts, setTradePosts] = useState<Post[]>([]);
   const nextPostId = React.useRef(samplePosts.length + 1);
   const [recruitmentPosts, setRecruitmentPosts] = useState<Post[]>([]);
+
+  const [serverPosts, setServerPosts] = useState<BackendPost[]>([]);
+  const [serverStatus, setServerStatus] = useState('불러오는 중...');
+  const [backendUser, setBackendUser] = useState<UserResponse | null>(null);
+  const [matchRecords, setMatchRecords] = useState<Record<number, MatchingResponse>>({});
+  const [hostMatchRequests, setHostMatchRequests] = useState<Record<number, MatchingResponse[]>>({});
+  const [liveRooms, setLiveRooms] = useState<ChatRoomResponse[]>([]);
+  const [liveMessages, setLiveMessages] = useState<Record<number, ChatMessageResponse[]>>({});
+  const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
+  const [liveTrades, setLiveTrades] = useState<TradeResponse[]>([]);
+  const [readyOrders, setReadyOrders] = useState<Record<number, PaymentOrderResponse>>({});
+  const [serverBusy, setServerBusy] = useState(false);
+
   const [matches, setMatches] = useState<Record<number, MatchStatus>>({});
-  const posts = [...recruitmentPosts, ...tradePosts, ...samplePosts];
-  const ownPosts = [...recruitmentPosts, ...tradePosts, ...myPosts];
+    // The demo post IDs are NOT backend IDs. Use actual IDs only when real posts exist.
+  const liveBackendCards: Post[] = serverPosts.map(serverPost => {
+    const card = mapBackendPostBasic(serverPost);
+    const firstImage = serverPost.imageUrls?.[0];
+    const imageUri = firstImage
+      ? /^https?:\/\//i.test(firstImage) ? firstImage
+        : `${getFanlinkApiUrl()}${firstImage.startsWith('/') ? '' : '/'}${firstImage}`
+      : undefined;
+    return {
+      id: card.id,
+      backendId: serverPost.id,
+      authorId: serverPost.authorId,
+      backendStatus: serverPost.status,
+      group: card.group,
+      club: card.club,
+      title: card.title,
+      summary: card.summary,
+      image: imageUri ? { uri: imageUri } : images.stadium,
+      likes: 0,
+      replies: 0,
+      ...(serverPost.category === 'MATE' || serverPost.category === 'CARPOOL' ? {
+        recruitment: {
+          ...serverRecruitment(serverPost, card.group as '카풀' | '직관메이트', card.club),
+          own: backendUser?.id === serverPost.authorId,
+        },
+      } : {}),
+      ...(serverPost.category === 'TICKET' && serverPost.facePrice != null ? {
+        trade: {
+          price: serverPost.facePrice,
+          referencePrice: serverPost.facePrice,
+          imageUri: imageUri ?? '',
+          author: serverPost.authorNickname,
+        },
+      } : {}),
+    };
+  });
+  const posts = liveBackendCards.length > 0 ? liveBackendCards : samplePosts; // Preview-only fallback, never used as DB IDs.
+  const ownPosts = liveBackendCards.length > 0
+    ? liveBackendCards.filter(item => backendUser?.id != null && item.authorId === backendUser.id)
+    : [...recruitmentPosts, ...tradePosts, ...myPosts];
   const [chat, setChat] = useState('라팍티켓');
   const [readRooms, setReadRooms] = useState<string[]>([]);
   const [saved, setSaved] = useState<number[]>([]);
@@ -195,71 +333,208 @@ function FanLink({ logout }: { logout: () => void }) {
       profilePickerPending.current = false;
     }
   }
-  const publishTrade = ({ group, club, title, body, price, imageUri, referencePrice }: TradeDraft) => {
-    const existing = screen === 'trade-edit' && post.trade ? post : undefined;
-    const savedPost: Post = {
-      id: existing?.id ?? nextPostId.current++, group, club, title, summary: body,
-      image: { uri: imageUri }, likes: existing?.likes ?? 0, replies: existing?.replies ?? 0,
-      trade: { price, referencePrice, imageUri, author: existing?.trade?.author ?? nickname },
-    };
-    if (existing) {
-      setTradePosts(old => old.map(item => item.id === savedPost.id ? savedPost : item));
-      setPost(savedPost);
-    } else {
-      setTradePosts(old => [savedPost, ...old]);
+  async function performServerAction(label: string, action: (token: string) => Promise<void>) {
+    if (serverBusy) return;
+    setServerBusy(true);
+    try {
+      const token = await requireBackendJwt();
+      await action(token);
+    } catch (error) {
+      Alert.alert(label, String(error instanceof Error ? error.message : error));
+    } finally {
+      setServerBusy(false);
     }
-    setGroup(group);
-    setClub(club);
-    setActivityFilter('전체');
-    back();
+  }
+  async function refreshPosts() {
+    const list = await getBackendPosts();
+    setServerPosts(list);
+    setServerStatus(list.length ? `서버 게시물 ${list.length}개 조회 완료` : '서버에 등록된 게시물이 없습니다.');
+  }
+  async function refreshRooms(token: string) {
+    setLiveRooms(await chatApi.myRooms(token));
+  }
+  async function refreshTrades(token: string) {
+    setLiveTrades(await tradeApi.mine(token));
+  }
+  async function showLiveRoom(room: ChatRoomResponse, context?: Post) {
+    const token = await requireBackendJwt();
+    const newMessages = await chatApi.messages(room.roomId, token);
+    setLiveMessages(old => ({...old, [room.roomId]: newMessages}));
+    setActiveRoomId(room.roomId);
+    const associated = context ?? liveBackendCards.find(item => item.backendId === room.postId);
+    if (associated) {
+      setChatPost(associated);
+      setChatGroup(associated.group);
+      setChat(associated.title);
+      if (room.type === 'MATCHING') {
+        try {
+          const match = await matchingApi.mine(room.postId, token);
+          setMatchRecords(old => ({...old, [room.postId]: match}));
+          setMatches(old => ({...old, [room.postId]: displayMatchStatus(match.status)}));
+        } catch { /* Host may view room without being the applicant. */ }
+      }
+    }
+    setDraft('');
+    push('chat');
+  }
+  async function openLiveChat(postItem: Post) {
+    if (postItem.backendId == null) return Alert.alert('데모', '실제 DB 게시물이 아니어서 채팅을 만들 수 없습니다.');
+    await performServerAction('채팅방 생성 실패', async token => {
+      if (postItem.authorId === backendUser?.id) {
+        Alert.alert('내 게시물', '본인 게시물은 채팅 목록에서 상대방이 생성한 방을 열어주세요.');
+        return;
+      }
+      const room = await chatApi.createRoom(postItem.backendId!, token);
+      await refreshRooms(token);
+      await showLiveRoom(room, postItem);
+    });
+  }
+  function updateMatchRecord(postId: number, record: MatchingResponse) {
+    setMatchRecords(old => ({...old, [postId]: record}));
+    setMatches(old => ({...old, [postId]: displayMatchStatus(record.status)}));
+  }
+  async function fetchHostMatchRequests(postItem: Post) {
+    if (postItem.backendId == null) return;
+    await performServerAction('매칭 신청 조회 실패', async token => {
+      const records = await matchingApi.applications(postItem.backendId!, token);
+      setHostMatchRequests(old => ({...old, [postItem.backendId!]: records}));
+    });
+  }
+  function changeHostMatch(request: MatchingResponse, action: 'accept' | 'reject') {
+    void performServerAction('매칭 요청 처리 실패', async token => {
+      const result = await matchingApi[action](request.requestId, token);
+      setHostMatchRequests(old => ({...old, [request.postId]:
+        (old[request.postId] ?? []).map(x => x.requestId === request.requestId ? result : x)}));
+      Alert.alert('매칭 요청', action === 'accept' ? '호스트가 수락했습니다.' : '신청을 거절했습니다.');
+    });
+  }
+  function updateTradeRecord(result: TradeResponse) {
+    setLiveTrades(old => [result, ...old.filter(t => t.tradeId !== result.tradeId)]);
+  }
+  async function showTradeRequests(postItem: Post) {
+    if (postItem.backendId == null) return;
+    await performServerAction('거래 요청 조회 실패', async token => {
+      const records = await tradeApi.applications(postItem.backendId!, token);
+      setHostTradeRequests(old => ({...old, [postItem.backendId!]: records}));
+    });
+  }
+  function handleTradeRequest(item: Post) {
+    if (item.backendId == null) return Alert.alert('샘플 게시물', '샘플에서는 거래 요청을 저장할 수 없습니다.');
+    void performServerAction('거래 신청 실패', async token => {
+      const result = await tradeApi.request(item.backendId!, token);
+      updateTradeRecord(result);
+      Alert.alert('거래 신청 완료', '판매자의 수락을 기다리고 있어요.');
+    });
+  }
+  function handleTradeDecision(record: TradeResponse, action: 'accept' | 'reject') {
+    void performServerAction('거래 처리 실패', async token => {
+      const updated = await tradeApi[action](record.tradeId, token);
+      setHostTradeRequests(old => ({...old, [record.postId]:
+        (old[record.postId] ?? []).map(x => x.tradeId === record.tradeId ? updated : x)}));
+      Alert.alert('거래', action === 'accept' ? '거래를 수락했습니다.' : '거래를 거절했습니다.');
+    });
+  }
+  function handlePaymentPrepare(record: TradeResponse) {
+    void performServerAction('결제 주문 생성 실패', async token => {
+      const order = await paymentApi.prepare(record.tradeId, token);
+      setReadyOrders(old => ({...old, [record.tradeId]: order}));
+      Alert.alert('결제 주문 준비됨', `주문번호: ${order.orderId}\n금액: ${order.amount.toLocaleString('ko-KR')}원\n\n아직 결제가 완료된 것은 아닙니다. 토스 테스트 결제창에서 승인받은 paymentKey가 필요합니다.`);
+    });
+  }
+  const [hostTradeRequests, setHostTradeRequests] = useState<Record<number, TradeResponse[]>>({});
+  const publishTrade = async ({ group, club, title, body, price, imageUri }: TradeDraft) => {
+    const token = await requireBackendJwt();
+    try {
+      if (screen === 'trade-edit' && post.backendId != null) {
+        await postApi.update(post.backendId, { title, content: body }, token);
+      } else {
+        const file = { uri: imageUri, name: 'fanlink-listing.jpg', mimeType: 'image/jpeg' };
+        const uploaded = await imageApi.upload(file, token);
+        const created = await postApi.create({
+          category: group === '티켓' ? 'TICKET' : 'GOODS', team: serverTeams[club],
+          title, content: body, facePrice: price, quantity: 1,
+          imageUrls: [uploaded.url],
+          ...(group === '티켓' ? {priceCaptureImageUrl: uploaded.url} : {}),
+        }, token);
+        Alert.alert('등록 완료', `실제 서버 게시글 #${created.id}이 등록되었습니다.`);
+      }
+      await refreshPosts();
+      back();
+    } catch (error) {
+      Alert.alert('게시글 등록 실패', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   };
 
   const deleteTrade = () => {
     if (!post.trade) return;
-    const id = post.id;
-    Alert.alert('거래 글 삭제', '이 글을 삭제할까요?', [
-      { text: '취소', style: 'cancel' },
-      { text: '삭제', style: 'destructive', onPress: () => {
-        setTradePosts(old => old.filter(item => item.id !== id));
-        setSaved(old => old.filter(item => item !== id));
-        setLiked(old => old.filter(item => item !== id));
-        setViewed(old => old.filter(item => item !== id));
-        setComments(old => {
-          const next = { ...old };
-          delete next[id];
-          return next;
-        });
-        setDraft('');
-        back();
-      } },
-    ]);
+    if (post.backendId != null) {
+      Alert.alert('거래 글 삭제', '서버에 저장된 이 게시물을 삭제할까요?', [
+        {text: '취소', style: 'cancel'},
+        {text: '삭제', style: 'destructive', onPress: () => void performServerAction('삭제 실패', async token => {
+          await postApi.delete(post.backendId!, token);
+          await refreshPosts(); back();
+        })},
+      ]);
+      return;
+    }
+    Alert.alert('샘플 게시물', '샘플 글은 서버에 존재하지 않습니다.');
+    return;
   };
 
-  const publishRecruitment = (draft: RecruitmentDraft) => {
-    const item: Post = {
-      id: nextPostId.current++, group: draft.group, club: draft.club, title: draft.title,
-      summary: draft.conditions, image: images.stadium, likes: 0, replies: 0,
-      recruitment: { ...draft, author: nickname, status: '모집 중', own: true },
-    };
-    setRecruitmentPosts(old => [item, ...old]);
-    setGroup(item.group);
-    setClub(item.club);
-    setActivityFilter('전체');
-    back();
+  const publishRecruitment = async (draft: RecruitmentDraft) => {
+    const token = await requireBackendJwt();
+    try {
+      const lines = [
+        `경기 일정: ${draft.gameAt}`, `모집 정원: ${draft.capacity}명`,
+        `${draft.group === '카풀' ? '출발지' : '만남 장소'}: ${draft.departure}`,
+        ...(draft.group === '카풀' ? [`목적지: ${draft.destination}`, `출발 일시: ${draft.departureAt}`, `경유 경로: ${draft.route}`] : []),
+        `참여 조건: ${draft.conditions}`,
+      ];
+      const created = await postApi.create({
+        category: draft.group === '카풀' ? 'CARPOOL' : 'MATE',
+        team: serverTeams[draft.club], title: draft.title,
+        content: lines.join('\n'), quantity: draft.capacity,
+      }, token);
+      await refreshPosts();
+      setGroup(draft.group);
+      setClub(draft.club);
+      setActivityFilter('전체');
+      Alert.alert('등록 완료', `실제 서버 게시글 #${created.id}이 등록되었습니다. 모집 정원은 현재 표시용이며 자동 마감은 별도 구현이 필요합니다.`);
+      back();
+    } catch (error) {
+      Alert.alert('모집 게시글 등록 실패', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   };
   const updateRecruitmentStatus = (status: RecruitmentStatus) => {
-    if (!post.recruitment?.own || post.recruitment.status === status) return;
-    const updated = { ...post, recruitment: { ...post.recruitment, status } };
-    setRecruitmentPosts(old => old.map(item => item.id === updated.id ? updated : item));
-    setPost(updated);
+    if (post.backendId != null) {
+      if (post.authorId !== backendUser?.id) return;
+      const next = status === '모집 중' ? 'ACTIVE' : status === '모집 완료' ? 'COMPLETED' : 'CLOSED';
+      void performServerAction('모집 상태 변경 실패', async token => {
+        await postApi.status(post.backendId!, next, token);
+        await refreshPosts();
+        setPost(old => ({...old, backendStatus: next,
+          recruitment: old.recruitment ? {...old.recruitment, status} : undefined}));
+      });
+      return;
+    }
+    Alert.alert('샘플 게시물', '모집 상태 변경은 실제 게시글에서만 가능합니다.');
+    return;
   };
   const openPost = (p: Post) => {
     setPost(p);
     setViewed(old => [p.id, ...old.filter(id => id !== p.id)]);
     setDraft('');
     push('detail');
+    if (p.backendId != null && p.authorId != null && p.authorId === backendUser?.id) {
+      if (p.recruitment) void fetchHostMatchRequests(p);
+      else if (p.group === '티켓') void showTradeRequests(p);
+    }
   };
   const openChat = (name: string, context = samplePosts[0]) => {
+    if (context.backendId != null) { void openLiveChat(context); return; }
+    setActiveRoomId(null);
     setChat(name);
     setReadRooms(old => old.includes(name) ? old : [...old, name]);
     setChatPost(context);
@@ -267,15 +542,46 @@ function FanLink({ logout }: { logout: () => void }) {
     push('chat');
   };
   const openMatch = (item: Post) => {
-    const recruitment = item.recruitment;
-    if (!recruitment || recruitment.own) return;
-    if (!matches[item.id] && recruitment.status !== '모집 중') return;
-    setMatches(old => old[item.id] ? old : { ...old, [item.id]: '신청 중' });
-    setChatGroup(recruitment.group);
-    openChat(recruitment.author, item);
+    if (item.backendId == null) {
+      Alert.alert('샘플 게시물', '실제 매칭 신청은 서버에 등록된 게시글에서만 가능합니다.');
+      return;
+    }
+    if (item.authorId != null && item.authorId === backendUser?.id) {
+      void fetchHostMatchRequests(item);
+      return;
+    }
+    if (item.backendStatus !== 'ACTIVE') {
+      Alert.alert('모집 마감', '이 게시글은 현재 모집 중이 아닙니다.');
+      return;
+    }
+    void performServerAction('매칭 신청 실패', async token => {
+      let match: MatchingResponse;
+      try {
+        match = await matchingApi.mine(item.backendId!, token);
+      } catch (error) {
+        if (!(error instanceof Error && 'status' in error && error.status === 404)) throw error;
+        match = await matchingApi.apply(item.backendId!, token);
+      }
+      updateMatchRecord(item.backendId!, match);
+      const room = await chatApi.createRoom(item.backendId!, token);
+      await refreshRooms(token);
+      await showLiveRoom(room, item);
+    });
   };
   const changeMatch = (id: number, expected: MatchStatus, next: MatchStatus) => {
-    setMatches(old => old[id] === expected ? { ...old, [id]: next } : old);
+    if (chatPost.backendId != null) {
+      const record = matchRecords[id];
+      if (!record) { Alert.alert('매칭', '신청 내역을 다시 조회해주세요.'); return; }
+      if (next !== '참여 확정' && next !== '참여 취소') return;
+      void performServerAction('매칭 변경 실패', async token => {
+        const result = next === '참여 확정'
+          ? await matchingApi.confirm(record.requestId, token)
+          : await matchingApi.cancel(record.requestId, token);
+        updateMatchRecord(id, result);
+      });
+      return;
+    }
+    Alert.alert('데모', '샘플 상태는 서버에 반영되지 않습니다.');
   };
   const toggle = (key: string, initial = true) => ({
     value: settings[key] ?? initial,
@@ -288,13 +594,20 @@ function FanLink({ logout }: { logout: () => void }) {
     const value = draft.trim();
     if (!value) return;
     if (screen === 'chat') {
-      const status = matches[chatPost.id];
-      if (chatPost.recruitment && (status === '거절됨' || status === '참여 취소')) return;
-      const key = chatPost.recruitment ? matchRoomKey(chatPost.id) : chat;
-      setMessages(old => ({ ...old, [key]: [...(old[key] ?? []), value] }));
+      if (activeRoomId == null) {
+        Alert.alert('데모 채팅', '실제 채팅방을 선택해야 서버에 메시지가 저장됩니다.');
+        return;
+      }
+      void performServerAction('메시지 전송 실패', async token => {
+        const saved = await chatApi.send(activeRoomId, value, token);
+        setLiveMessages(old => ({...old, [activeRoomId]: [
+          ...(old[activeRoomId] ?? []).filter(x => x.messageId !== saved.messageId), saved,
+        ]}));
+        setDraft('');
+      });
+      return;
     }
-    else setComments(old => ({ ...old, [post.id]: [...(old[post.id] ?? []), value] }));
-    setDraft('');
+    Alert.alert('댓글 데모', '실제 댓글 전송은 아직 연결되지 않았습니다.');
   };
 
   function postCard(item: Post, compact = false) {
@@ -313,6 +626,7 @@ function FanLink({ logout }: { logout: () => void }) {
           {!compact && !item.trade && !item.recruitment && <Text style={s.small}>💬 FANLINK 안전거래 또는 현장 전달 가능</Text>}
         </View>
       </Pressable>
+      {item.backendId == null && <Text style={s.tiny}>샘플 게시글 · 서버 거래 불가</Text>}
       <View style={[s.between, { marginTop: 6 }]}><View style={s.inline}>
         <Pressable style={s.inline} onPress={() => setLiked(flip(liked, item.id))}><Icon name={liked.includes(item.id) ? 'heart' : 'heart-outline'} color="#ee4960" size={16} /><Text style={s.small}>{item.likes + Number(liked.includes(item.id))}</Text></Pressable>
         <Pressable style={s.inline} onPress={() => openPost(item)}><Icon name="chatbubble-outline" size={14} /><Text style={s.small}>{item.replies + (comments[item.id]?.length ?? 0)}</Text></Pressable>
@@ -320,7 +634,7 @@ function FanLink({ logout }: { logout: () => void }) {
     </View>;
   }
   function linkPay(onPress: () => void) {
-    return <Pressable onPress={onPress} style={[s.banner, s.payBanner]}><View><Text style={s.whiteTitle}>Ⅼ LinkPay</Text><Text style={s.whiteSmall}>앱 내 안심결제 (클린페이)</Text></View><View style={s.payBalance}><Text style={s.whiteSmall}>거래잔액</Text><Text style={s.whiteTitle}>150,000원 ›</Text></View><Icon name="wallet" color="#9ecbff" size={32} /></Pressable>;
+    return <Pressable onPress={onPress} style={[s.banner, s.payBanner]}><View><Text style={s.whiteTitle}>Ⅼ LinkPay</Text><Text style={s.whiteSmall}>테스트 결제·정산 (연동 준비)</Text></View><View style={s.payBalance}><Text style={s.whiteSmall}>결제·정산 서비스</Text><Text style={s.whiteTitle}>연동 확인 필요 ›</Text></View><Icon name="wallet" color="#9ecbff" size={32} /></Pressable>;
   }
   function stats() {
     return <View style={s.stats}>{[['128', '게시글'], ['432', '댓글'], ['56', '거래내역'], ['18', '팔로워']].map(([n, label]) =>
@@ -335,6 +649,7 @@ function FanLink({ logout }: { logout: () => void }) {
   function home() {
     const orderedClubs = [clubs[fanClub], ...clubs.filter((_, index) => index !== fanClub)];
     return <>
+      <Text style={s.small}>{serverStatus} · 서버 데이터가 0개일 때 아래 샘플 화면은 미리보기입니다.</Text>
       <View style={[s.banner, s.weather]}>
         <Icon name="partly-sunny" color="#fff49a" size={36} />
         <View style={s.flex}>
@@ -353,6 +668,34 @@ function FanLink({ logout }: { logout: () => void }) {
           <View style={s.matchTime}><Text style={s.rowTitle}>▣  {c.date}</Text><Text style={s.small}>◷  {c.time}</Text>{!!c.place && <Text style={s.small}>⌖  {c.place}</Text>}</View>
         </View>
       </View>)}</Section>
+
+      <Section title="서버 게시물">
+        <View style={s.panel}>
+          <Text style={s.small}>{serverStatus}</Text>
+
+          {serverPosts.slice(0, 5).map(item => {
+            const groupName: Record<string, string> = {
+              TICKET: '티켓',
+              GOODS: '굿즈',
+              CARPOOL: '카풀',
+              MATE: '직관메이트',
+            };
+
+            return (
+                <Row
+                    key={`server-${item.id}`}
+                    icon="document-text-outline"
+                    label={`[${groupName[item.category] ?? item.category}] ${item.title}`}
+                    hint={`${item.authorNickname} · 게시물 #${item.id}`}
+                    onPress={() =>
+                        Alert.alert(item.title, item.content)
+                    }
+                />
+            );
+          })}
+        </View>
+      </Section>
+
       <Section title="🔥 인기게시물" action={() => replace('community')}>
         <View style={s.panel}>
           {[...posts].sort((a, b) => b.likes - a.likes).slice(0, 3).map(item =>
@@ -385,11 +728,24 @@ function FanLink({ logout }: { logout: () => void }) {
     );
     const matchingRooms = posts.filter(item => item.recruitment && item.group === chatGroup && matches[item.id]
       && (!search || item.title.includes(search) || item.recruitment.author.includes(search)));
+    const filteredLive = liveRooms.filter(room => {
+      const context = liveBackendCards.find(post => post.backendId === room.postId);
+      return (!context || context.group === chatGroup) && (!search || context?.title.includes(search) || String(room.roomId).includes(search));
+    });
     return <>
       <View style={s.between}><Text style={[s.title, s.shrink]}>1대1 채팅</Text><View style={s.inline}><IconButton name="search-outline" label="채팅 검색" onPress={() => setSearch(search === null ? '' : null)} /><IconButton name="create-outline" label="새 채팅" onPress={() => replace('community')} /></View></View>
       {search !== null && <TextInput placeholder="채팅방 검색" style={s.input} value={search} onChangeText={setSearch} />}
       <Pills items={categories.map(c => c.name)} value={chatGroup} onChange={setChatGroup} />
-      {matchingRooms.map(item => <Pressable key={item.id} onPress={() => openMatch(item)} style={s.chatRow}>
+      {backendJwt && filteredLive.map(room => <Pressable key={`live-${room.roomId}`} onPress={() => void performServerAction('채팅방 조회 실패', async () => {
+        await showLiveRoom(room);
+      })} style={s.chatRow}>
+        <Avatar size={47} />
+        <View style={s.flex}><Text style={s.postTitle}>{liveBackendCards.find(item => item.backendId === room.postId)?.title ?? `게시글 #${room.postId}`}</Text>
+          <Text style={s.small}>채팅방 #{room.roomId} · {room.type === 'MATCHING' ? '메이트·카풀' : '거래'}</Text></View>
+        <Icon name="chevron-forward" size={14} />
+      </Pressable>)}
+      {!backendJwt && <Text style={s.small}>현재 아래 목록은 미리보기입니다. 실제 채팅에는 서버 로그인이 필요합니다.</Text>}
+      {!backendJwt && matchingRooms.map(item => <Pressable key={item.id} onPress={() => openMatch(item)} style={s.chatRow}>
         <Avatar source={clubs[item.club].logo} size={47} />
         <View style={s.flex}>
           <Text style={s.postTitle}>{item.title}</Text>
@@ -397,11 +753,13 @@ function FanLink({ logout }: { logout: () => void }) {
         </View>
         <Icon name="chevron-forward" size={14} />
       </Pressable>)}
-      {list.length ? list.map(([name, message, time, unread], i) => <Pressable key={name} onPress={() => openChat(name, samplePosts[[0, 3, 6, 4][index]])} style={s.chatRow}>
+      {!backendJwt && (list.length ? list.map(([name, message, time, unread], i) => <Pressable key={name} onPress={() => openChat(name, samplePosts[[0, 3, 6, 4][index]])} style={s.chatRow}>
         <Avatar source={[images.avatar, images.samsung, images.cap, images.stadium][i % 4]} size={47} />
         <View style={s.flex}><Text style={s.postTitle}>{name}</Text><Text style={s.small} numberOfLines={1}>{messages[name]?.at(-1) ?? message}</Text></View>
         <View style={s.chatMeta}><Text style={s.tiny}>{time}</Text>{!!unread && !readRooms.includes(name) && <Text style={s.unread}>{unread}</Text>}</View>
-      </Pressable>) : !matchingRooms.length && <Empty text="채팅 내역이 없어요." />}
+      </Pressable>) : !matchingRooms.length && <Empty text="미리보기 채팅 내역이 없어요." />)}
+      {backendJwt && !filteredLive.length && <Empty text="서버에 개설된 채팅방이 없어요." />}
+      {backendJwt && <Pill label="채팅방 새로고침" onPress={() => void performServerAction('조회 실패', async token => refreshRooms(token))} />}
     </>;
   }
   function my() {
@@ -446,7 +804,7 @@ function FanLink({ logout }: { logout: () => void }) {
         {!post.trade && post.group === '티켓' && <Text style={s.body}>🗓 경기정보 · {post.title.replace('[정가양도] ', '')}{'\n'}⏰ 일시 · 11/8 (토) 17:00{'\n'}📍 장소 · 대구 삼성라이온즈파크</Text>}
         {post.trade && <>
           <Text style={s.postTitle}>판매 희망가 · {post.trade.price.toLocaleString('ko-KR')}원</Text>
-          <Text style={s.small}>검증 기준 데모 정가 · {post.trade.referencePrice.toLocaleString('ko-KR')}원</Text>
+          <Text style={s.small}>{post.backendId != null ? '서버 게시글 표시 금액' : '샘플 정가'} · {post.trade.referencePrice.toLocaleString('ko-KR')}원</Text>
         </>}
         <Text style={s.body}>{post.summary}</Text>
         {!post.trade && !post.recruitment && <>
@@ -459,19 +817,51 @@ function FanLink({ logout }: { logout: () => void }) {
       </View>}
       <View style={[s.between, s.wrap]}>
         <View style={s.inline}><Pill label={String(post.likes + Number(liked.includes(post.id)))} icon={liked.includes(post.id) ? 'heart' : 'heart-outline'} onPress={() => setLiked(flip(liked, post.id))} /><Pill label={String(post.replies + (comments[post.id]?.length ?? 0))} icon="chatbubble-outline" onPress={() => scroller.current?.scrollToEnd()} /></View>
-        {!post.trade && !post.recruitment && <Pill label="1:1 채팅" icon="chatbubble-outline"
+        {(post.group === '티켓' || post.group === '굿즈') && <Pill label="1:1 채팅" icon="chatbubble-outline"
           onPress={() => openChat(post.group === '굿즈' ? '라이온즈굿즈' : '라팍티켓', post)} />}
         {post.recruitment && !post.recruitment.own && (matches[post.id] || post.recruitment.status === '모집 중')
           && <Pill label={matches[post.id] ? '매칭 채팅 열기' : '1:1 매칭 신청'} icon="chatbubble-outline" onPress={() => openMatch(post)} />}
         {post.recruitment && !post.recruitment.own && !matches[post.id] && post.recruitment.status !== '모집 중'
           && <Text style={[s.small, s.shrink]}>이 모집 글은 신청이 마감됐어요.</Text>}
       </View>
-      {post.recruitment?.own && <View style={[s.inline, s.wrap]}>
+      {post.backendId != null && post.group === '티켓' && post.authorId !== backendUser?.id && <View style={[s.inline, s.wrap]}>
+        <Pill label="구매 요청" icon="card-outline" onPress={() => handleTradeRequest(post)} />
+        {liveTrades.filter(t => t.postId === post.backendId).map(t => <View key={t.tradeId} style={s.panel}>
+          <Text style={s.small}>거래 #{t.tradeId} · {t.status} · {t.unitFacePrice.toLocaleString('ko-KR')}원</Text>
+          {t.status === 'ACCEPTED' && <Pill label="테스트 결제 주문 만들기" onPress={() => handlePaymentPrepare(t)} />}
+          {(t.status === 'REQUESTED' || t.status === 'ACCEPTED') && <Pill label="거래 요청 취소" onPress={() => void performServerAction('거래 취소 실패', async token => {
+            updateTradeRecord(await tradeApi.cancel(t.tradeId, token));
+          })} />}
+          {readyOrders[t.tradeId] && <Text style={s.small}>주문 준비됨 · {readyOrders[t.tradeId].amount.toLocaleString('ko-KR')}원 (결제 승인 전)</Text>}
+        </View>)}
+      </View>}
+      {post.backendId != null && post.group === '티켓' && post.authorId === backendUser?.id && <View style={s.section}>
+        <Pill label="구매 요청 새로고침" onPress={() => void showTradeRequests(post)} />
+        {(hostTradeRequests[post.backendId] ?? []).map(t => <View key={t.tradeId} style={s.panel}>
+          <Text style={s.small}>구매자 #{t.buyerId} · {t.status} · {t.unitFacePrice.toLocaleString('ko-KR')}원</Text>
+          {t.status === 'REQUESTED' && <View style={[s.inline, s.wrap]}>
+            <Pill label="판매 수락" onPress={() => handleTradeDecision(t,'accept')} />
+            <Pill label="판매 거절" onPress={() => handleTradeDecision(t,'reject')} />
+          </View>}
+        </View>)}
+      </View>}
+      {post.backendId != null && post.recruitment && post.authorId === backendUser?.id && <View style={s.section}>
+        <Pill label="매칭 신청 새로고침" onPress={() => void fetchHostMatchRequests(post)} />
+        {(hostMatchRequests[post.backendId] ?? []).map(m => <View key={m.requestId} style={s.panel}>
+          <Text style={s.small}>신청자 #{m.applicantId} · {displayMatchStatus(m.status)}</Text>
+          {m.status === 'REQUESTED' && <View style={[s.inline, s.wrap]}>
+            <Pill label="매칭 수락" onPress={() => changeHostMatch(m, 'accept')} />
+            <Pill label="매칭 거절" onPress={() => changeHostMatch(m, 'reject')} />
+          </View>}
+        </View>)}
+      </View>}
+      {post.recruitment?.own && post.backendId != null && <View style={[s.inline, s.wrap]}>
         {(['모집 중', '모집 완료', '취소'] as const).map(status =>
           <Pill key={status} label={status} selected={post.recruitment?.status === status}
             onPress={() => updateRecruitmentStatus(status)} />)}
       </View>}
-      {post.trade && <View style={[s.inline, s.wrap]}>
+      {post.backendId == null && <Text style={s.small}>이 게시물은 화면 미리보기용 샘플이며 실제 매칭·거래가 저장되지 않습니다.</Text>}
+      {post.trade && post.backendId != null && post.authorId === backendUser?.id && <View style={[s.inline, s.wrap]}>
         <Pill label="글 수정" icon="create-outline" onPress={() => push('trade-edit')} />
         <Pill label="글 삭제" icon="trash-outline" onPress={deleteTrade} />
       </View>}
@@ -488,18 +878,19 @@ function FanLink({ logout }: { logout: () => void }) {
         <Text style={s.postTitle}>{chat} · 매칭 채팅</Text>
         <Text style={s.body}>현재 상태 · {status}</Text>
         <Text style={s.small}>출발 시간과 장소, 참여 조건을 채팅으로 조율해요.</Text>
-        {status === '신청 중' && <>
-          <Text style={s.small}>데모에서 상대방의 응답을 선택할 수 있어요.</Text>
+        {activeRoomId == null && status === '신청 중' && <>
+          <Text style={s.small}>데모 상태이며 실제 매칭은 아닙니다.</Text>
           <View style={[s.inline, s.wrap]}>
             <Pill label="호스트 동의 (데모)" onPress={() => changeMatch(chatPost.id, status, '호스트 동의')} />
             <Pill label="호스트 거절 (데모)" onPress={() => changeMatch(chatPost.id, status, '거절됨')} />
           </View>
         </>}
       </View>
-      {(messages[matchRoomKey(chatPost.id)] ?? []).map((message, i) =>
-        <View key={i} style={[s.messageRow, s.messageMine]}>
-          <Text style={[s.bubble, s.bubbleMine]}>{message}</Text>
-        </View>)}
+      {activeRoomId != null ? (liveMessages[activeRoomId] ?? []).map(message =>
+        <View key={message.messageId} style={[s.messageRow, message.senderId === backendUser?.id ? s.messageMine : s.messageTheirs]}>
+          <Text style={[s.bubble, message.senderId === backendUser?.id && s.bubbleMine]}>{message.content}</Text>
+        </View>) : (messages[matchRoomKey(chatPost.id)] ?? []).map((message, i) =>
+          <View key={i} style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>{message}</Text></View>)}
     </>;
   }
 
@@ -510,13 +901,14 @@ function FanLink({ logout }: { logout: () => void }) {
     }
     return <View style={s.matchActions}>
       {status === '신청 중' && <Text style={[s.small, s.shrink]}>호스트 동의 대기 중</Text>}
-      {status === '호스트 동의' && <Pill label="나도 동의하기" selected onPress={() => changeMatch(id, status, '상호 동의')} />}
+      {status === '호스트 동의' && chatPost.backendId != null && <Pill label="참여 확정" selected onPress={() => changeMatch(id, status, '참여 확정')} />}
+      {status === '호스트 동의' && chatPost.backendId == null && <Pill label="나도 동의하기 (데모)" selected onPress={() => changeMatch(id, status, '상호 동의')} />}
       {status === '상호 동의' && <Pill label="참여 확정" selected onPress={() => changeMatch(id, status, '참여 확정')} />}
       {status === '참여 확정' && <Pill label="참여 중인 모임" selected onPress={() => setStack(['my', 'joined'])} />}
-      <Pill label="참여 취소" onPress={() => Alert.alert('참여 취소', '이 모임 참여를 취소할까요?', [
+      {(chatPost.backendId == null || status === '신청 중' || status === '호스트 동의') && <Pill label="참여 취소" onPress={() => Alert.alert('참여 취소', '이 모임 참여를 취소할까요?', [
         { text: '닫기', style: 'cancel' },
         { text: '참여 취소', style: 'destructive', onPress: () => changeMatch(id, status, '참여 취소') },
-      ])} />
+      ])} />}
     </View>;
   }
 
@@ -531,6 +923,18 @@ function FanLink({ logout }: { logout: () => void }) {
 
   function chatRoom() {
     const post = chatPost;
+    if (activeRoomId != null) {
+      return <>
+        <View style={s.between}><Text style={s.postTitle}>서버 채팅방 #{activeRoomId}</Text><Pill label="관련 글" onPress={() => openPost(post)} /></View>
+        <Text style={s.small}>메시지는 실제 서버에 저장됩니다. 거래 상태는 결제 승인 전까지 변경되지 않습니다.</Text>
+        {(liveMessages[activeRoomId] ?? []).map(message => <View key={message.messageId}
+          style={[s.messageRow, message.senderId === backendUser?.id ? s.messageMine : s.messageTheirs]}>
+          {message.senderId !== backendUser?.id && <Avatar size={28} />}
+          <Text style={[s.bubble, message.senderId === backendUser?.id && s.bubbleMine]}>{message.content}</Text>
+        </View>)}
+        {!(liveMessages[activeRoomId] ?? []).length && <Empty text="첫 메시지를 보내보세요." />}
+      </>;
+    }
     const paymentKey = chat + ':' + post.id;
     const payment = completed.includes(paymentKey);
     return <>
@@ -544,7 +948,7 @@ function FanLink({ logout }: { logout: () => void }) {
       ].map(([mine, message], i) => <View key={i} style={[s.messageRow, mine ? s.messageMine : s.messageTheirs]}>{!mine && <Avatar size={28} />}<Text style={[s.bubble, mine && s.bubbleMine]}>{message}</Text><Text style={s.tiny}>오후 5:{24 + i}</Text></View>)}
       <View style={[s.messageRow, s.messageTheirs]}><Avatar size={28} /><View style={s.paymentCard}>
         <Text style={s.link}>Ⅼ LinkPay</Text><Text style={s.postTitle}>티켓 결제 요청 (52,000원)</Text><Text style={s.small}>{post.title}</Text>
-        <Button label={payment ? '결제 완료' : '결제하기 ↗'} onPress={() => !payment && Alert.alert('샘플 결제', '데모 화면의 상태를 변경할까요?', [{ text: '취소', style: 'cancel' }, { text: '확인', onPress: () => setCompleted(old => [...old, paymentKey]) }])} />
+        <Button label="결제 데모 (실제 결제 불가)" onPress={() => Alert.alert('데모 결제', '실제 결제 승인과 무관한 미리보기 화면입니다.')} />
       </View></View>
       {payment && <View style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>결제 완료했습니다!</Text></View>}
       {(messages[chat] ?? []).map((message, i) => <View key={i} style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>{message}</Text></View>)}
@@ -643,6 +1047,17 @@ function FanLink({ logout }: { logout: () => void }) {
     </>;
   }
   function history() {
+    if (backendJwt) return <>
+      <Section title="내 거래 내역">
+        <Pill label="거래 내역 새로고침" onPress={() => void performServerAction('조회 실패', async token => refreshTrades(token))} />
+        {liveTrades.length ? liveTrades.map(t => <View key={t.tradeId} style={s.card}>
+          <Text style={s.postTitle}>거래 #{t.tradeId} · 게시글 #{t.postId}</Text>
+          <Text style={s.small}>{t.unitFacePrice.toLocaleString('ko-KR')}원 · 상태 {t.status}</Text>
+          {t.status === 'ACCEPTED' && <Button label="결제 주문 준비" onPress={() => handlePaymentPrepare(t)} />}
+          {readyOrders[t.tradeId] && <Text style={s.small}>주문번호 {readyOrders[t.tradeId].orderId} · 결제 승인 전</Text>}
+        </View>) : <Empty text="실제 거래 내역이 없어요." />}
+      </Section>
+    </>;
     const rows = [
       { label: samplePosts[0].title, kind: '구매', amount: '-52,000원', image: images.stadium },
       { label: '판매 정산 입금', kind: '정산(입금)', amount: '+85,000원', image: undefined },
@@ -652,10 +1067,10 @@ function FanLink({ logout }: { logout: () => void }) {
     ];
     return <>
       <Pills items={['전체', '구매', '판매', '정산(입금)', '충전/출금']} value={historyFilter} onChange={setHistoryFilter} />
-      {linkPay(() => info('LinkPay', '거래잔액 150,000원'))}
+      {linkPay(() => info('LinkPay', '실제 결제·정산 잔액 조회는 아직 연동되지 않았습니다.'))}
       <View style={[s.panel, s.between]}><IconButton name="chevron-back" label="이전 달" onPress={() => setMonth(Math.max(1, month - 1))} /><Text style={s.postTitle}>2025년 {month}월 ⌄</Text><IconButton name="chevron-forward" label="다음 달" onPress={() => setMonth(Math.min(12, month + 1))} /></View>
       <Section title={month + '월 거래 요약'}><View style={[s.panel, s.stats]}>{[['구매', '-102,000원'], ['판매', '+85,000원'], ['정산(입금)', '+85,000원']].map(([label, value]) => <View key={label} style={s.stat}><Text style={s.small}>{label}</Text><Text style={s.link}>{month === 11 ? value : '0원'}</Text></View>)}</View></Section>
-      <Section title="거래 내역">{month === 11 ? rows.filter(item => historyFilter === '전체' || item.kind === historyFilter).map(item => <Pressable key={item.label} style={[s.card, s.inline]} onPress={() => info(item.kind, item.label + '\n' + item.amount)}>{item.image ? <Image source={item.image} style={s.thumb} /> : <View style={s.squareIcon}><Icon name="wallet-outline" color={blue} /></View>}<View style={s.flex}><Text style={s.link}>{item.kind}</Text><Text style={s.rowTitle}>{item.label}</Text><Text style={s.tiny}>2025.11.08 17:02</Text></View><View><Text style={s.link}>{item.amount}</Text><Text style={s.complete}>거래완료</Text></View></Pressable>) : <Empty text="이 달의 거래 내역이 없어요." />}</Section>
+      <Section title="거래 내역">{month === 11 ? rows.filter(item => historyFilter === '전체' || item.kind === historyFilter).map(item => <Pressable key={item.label} style={[s.card, s.inline]} onPress={() => info(item.kind, item.label + '\n' + item.amount)}>{item.image ? <Image source={item.image} style={s.thumb} /> : <View style={s.squareIcon}><Icon name="wallet-outline" color={blue} /></View>}<View style={s.flex}><Text style={s.link}>{item.kind}</Text><Text style={s.rowTitle}>{item.label}</Text><Text style={s.tiny}>2025.11.08 17:02</Text></View><View><Text style={s.link}>{item.amount}</Text><Text style={s.complete}>샘플 표시</Text></View></Pressable>) : <Empty text="이 달의 거래 내역이 없어요." />}</Section>
     </>;
   }
   function support() {
@@ -711,7 +1126,13 @@ function FanLink({ logout }: { logout: () => void }) {
       onPublish={publishRecruitment} />
   ) : screen === 'joined' ? joined() : screen === 'trade-compose' || screen === 'trade-edit' ? (
     <TradeComposer initialGroup={group === '굿즈' ? '굿즈' : '티켓'} initialClub={club}
-      initialDraft={editDraft} onPublish={publishTrade} />
+      initialDraft={editDraft} onPublish={publishTrade}
+      onVerifyPrice={async (imageUri, price) => {
+        const token = await requireBackendJwt();
+        const result = await ticketPriceApi.verify({uri: imageUri, name: 'purchase-capture.jpg', mimeType: 'image/jpeg'}, price, token);
+        if (!result.valid || !result.verified) throw new Error(result.message || '정가 인증에 실패했습니다.');
+        return result.extractedFacePrice ?? price;
+      }} />
   ) : screen === 'home' ? home() : screen === 'community' ? community() : screen === 'chats' ? chats() :
     screen === 'my' ? my() : screen === 'detail' ? detail() : screen === 'chat' ? (matchingStatus ? matchingChat() : chatRoom()) :
     screen === 'profile' ? profile() : screen === 'security' ? security() : screen === 'notifications' ? notifications() :
@@ -751,7 +1172,7 @@ function FanLink({ logout }: { logout: () => void }) {
       {isComposer && <View style={s.composer}>
         <IconButton name={screen === 'chat' ? 'add-circle-outline' : 'image-outline'} label="첨부 메뉴" onPress={() => select('첨부', ['사진', '파일'])} />
         <TextInput style={[s.input, s.flex]} placeholder={screen === 'chat' ? '메시지를 입력하세요...' : '댓글을 입력하세요...'} value={draft} onChangeText={setDraft} onSubmitEditing={() => { send(); setTimeout(() => scroller.current?.scrollToEnd(), 80); }} returnKeyType="send" />
-        <Pressable accessibilityRole="button" accessibilityLabel="보내기" style={s.send} onPress={() => { send(); setTimeout(() => scroller.current?.scrollToEnd(), 80); }}><Icon name="send" size={17} color="white" /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="보내기" disabled={serverBusy} style={[s.send, serverBusy && {opacity:0.5}]} onPress={() => { send(); setTimeout(() => scroller.current?.scrollToEnd(), 80); }}><Icon name="send" size={17} color="white" /></Pressable>
       </View>}
       {(isTab || screen === 'empty') && <View style={s.tabbar}>{tabScreens.map((tab, i) => <Pressable key={tab} accessibilityRole="tab" accessibilityLabel={tabLabels[i]} accessibilityState={{ selected: screen === tab }} style={s.tab} onPress={() => replace(tab)}><Icon name={screen === tab ? tabIcons[i] : (tabIcons[i] + '-outline') as IconName} color={screen === tab ? '#0b111a' : '#59616c'} size={24} /></Pressable>)}</View>}
     </KeyboardAvoidingView>
