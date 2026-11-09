@@ -30,7 +30,10 @@ public class PostService {
 	public Post create(Long authorId, PostCreateRequest request) {
 		User author = userService.getById(authorId);
 
-		if (request.category() == PostCategory.TICKET && request.facePrice() != null) {
+		if (request.category() == PostCategory.TICKET) {
+			if (request.facePrice() == null || request.facePrice() <= 0) {
+				throw ApiException.badRequest("티켓 양도글에는 0원보다 큰 티켓 1장당 정가가 필요합니다.");
+			}
 			verifyTicketPriceOrThrow(request);
 		}
 
@@ -55,7 +58,9 @@ public class PostService {
 		byte[] captureBytes = fileStorageService.readImage(request.priceCaptureImageUrl());
 		VerifyTicketPriceResponse result = priceVerificationService.verify(
 				captureBytes, request.priceCaptureImageUrl(), request.facePrice());
-		if (!result.valid()) {
+		// OCR 미설정 또는 가격 인식 실패 상태(verified=false)는 정가 검증 완료가 아니다.
+		// 별도 수동 승인 절차가 없으므로, 검증할 수 없는 티켓은 게시를 차단한다.
+		if (!result.valid() || !result.verified()) {
 			throw ApiException.badRequest(result.message());
 		}
 	}
@@ -93,6 +98,13 @@ public class PostService {
 	public Post update(Long postId, Long requesterId, PostUpdateRequest request) {
 		Post post = getById(postId);
 		post.verifyAuthor(requesterId);
+		// 수정 API에는 정가 검증용 새 캡처를 전달하는 필드가 없다.
+		// 따라서 티켓 정가 변경은 허용하지 않는다(기존 정가와 같은 값은 허용).
+		if (post.getCategory() == PostCategory.TICKET
+				&& request.facePrice() != null
+				&& !request.facePrice().equals(post.getFacePrice())) {
+			throw ApiException.badRequest("티켓 정가 변경은 재검증이 필요하여 현재 수정할 수 없습니다.");
+		}
 		post.update(request.title(), request.content(), request.facePrice(), request.quantity(), request.imageUrls());
 		return post;
 	}
