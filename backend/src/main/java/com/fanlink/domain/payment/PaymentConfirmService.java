@@ -104,6 +104,15 @@ public class PaymentConfirmService {
             );
         }
 
+        // Do not reapprove a charged-but-unprotected transaction.
+        if (order.getStatus() == PaymentOrderStatus.ESCROW_REVIEW) {
+            if (request.paymentKey().equals(order.getPaymentKey())) {
+                return PaymentOrderResponse.from(order);
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "기존 결제가 에스크로 검토 중입니다.");
+        }
+
         // 9. 결제 가능한 상태인지 확인
         if (order.getStatus() != PaymentOrderStatus.READY
                 || trade.getStatus() != TradeStatus.ACCEPTED) {
@@ -114,17 +123,20 @@ public class PaymentConfirmService {
             );
         }
 
-        // 10. 토스페이먼츠 실제 승인 API 호출
-        // 이 메서드는 PG 응답의 DONE, 금액, 주문번호,
-        // 결제 식별자까지 검증한 경우에만 정상 반환한다.
-        tossPaymentClient.confirm(
-                request.paymentKey(),
-                order.getOrderId(),
-                order.getAmount()
+        // PG confirms the charge. Never call it twice to "retry" escrow.
+        TossPaymentResult payment = tossPaymentClient.confirm(
+                request.paymentKey(), order.getOrderId(), order.getAmount()
         );
 
-        // 11. PG 승인 성공 후 DB 상태 변경
-        order.markApproved(request.paymentKey());
+        // Record successful but unprotected PG charges for manual resolution.
+        // Throwing here would roll back the DB while the external PG remains paid.
+        if (payment == null || !payment.useEscrow()
+                || payment.escrowKey() == null || payment.escrowKey().isBlank()) {
+            order.markEscrowReview(request.paymentKey());
+            return PaymentOrderResponse.from(order);
+        }
+
+        order.markApproved(request.paymentKey(), payment.escrowKey());
         trade.changeStatus(TradeStatus.PAID);
 
         return PaymentOrderResponse.from(order);

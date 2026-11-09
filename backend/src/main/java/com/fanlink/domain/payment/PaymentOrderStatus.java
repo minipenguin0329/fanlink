@@ -5,5 +5,6 @@ public enum PaymentOrderStatus {
     READY,
     APPROVED,
     FAILED,
-    CANCELED
+    CANCELED,
+    ESCROW_REVIEW
 }

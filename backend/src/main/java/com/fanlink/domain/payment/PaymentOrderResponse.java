@@ -9,6 +9,7 @@ public record PaymentOrderResponse(
         String orderId,
         int amount,
         PaymentOrderStatus status,
+        boolean escrowVerified,
         LocalDateTime createdAt
 ) {
     public static PaymentOrderResponse from(
@@ -20,6 +21,8 @@ public record PaymentOrderResponse(
                 order.getOrderId(),
                 order.getAmount(),
                 order.getStatus(),
+                order.getStatus() == PaymentOrderStatus.APPROVED
+                        && order.getEscrowKey() != null,
                 order.getCreatedAt()
         );
     }

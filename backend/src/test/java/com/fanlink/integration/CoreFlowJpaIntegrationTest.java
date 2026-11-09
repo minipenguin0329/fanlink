@@ -25,6 +25,7 @@ import com.fanlink.domain.user.AuthProvider;
 import com.fanlink.domain.user.Team;
 import com.fanlink.domain.user.User;
 import com.fanlink.domain.user.UserRepository;
+import com.fanlink.domain.payment.TossPaymentResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -151,6 +152,9 @@ class CoreFlowJpaIntegrationTest {
         assertEquals(10000, order.amount());
         assertEquals(PaymentOrderStatus.READY, order.status());
         assertEquals(order.orderId(), orders.prepareOrder(requested.tradeId(), buyer.getId()).orderId());
+
+        when(toss.confirm("test-payment-key-integrated", order.orderId(), 10000))
+                .thenReturn(new TossPaymentResult(true, "ESCROW_TEST_INTEGRATED"));
 
         PaymentOrderResponse approved = payments.confirm(
                 new PaymentConfirmRequest("test-payment-key-integrated", order.orderId(), 10000),

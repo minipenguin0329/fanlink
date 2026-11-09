@@ -48,6 +48,10 @@ public class PaymentOrder {
     @Column(name = "payment_key", unique = true, length = 200)
     private String paymentKey;
 
+    // Provider-side protection reference: do not infer escrow from local trade status.
+    @Column(name = "escrow_key", length = 200)
+    private String escrowKey;
+
     @Version
     private Long version;
 
@@ -99,7 +103,7 @@ public class PaymentOrder {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public void markApproved(String confirmedPaymentKey) {
+    public void markApproved(String confirmedPaymentKey, String verifiedEscrowKey) {
         if (status != PaymentOrderStatus.READY) {
             throw new IllegalStateException(
                     "승인 대기 주문만 결제 완료 처리할 수 있습니다."
@@ -114,8 +118,24 @@ public class PaymentOrder {
             );
         }
 
+        if (verifiedEscrowKey == null || verifiedEscrowKey.isBlank()
+                || verifiedEscrowKey.length() > 200) {
+            throw new IllegalArgumentException("에스크로 식별자가 필요합니다.");
+        }
         this.paymentKey = confirmedPaymentKey;
+        this.escrowKey = verifiedEscrowKey;
         this.status = PaymentOrderStatus.APPROVED;
+    }
+
+
+    /** PG payment succeeded, but merchant escrow protection was NOT verified. */
+    public void markEscrowReview(String confirmedPaymentKey) {
+        if (status != PaymentOrderStatus.READY || confirmedPaymentKey == null
+                || confirmedPaymentKey.isBlank() || confirmedPaymentKey.length() > 200) {
+            throw new IllegalStateException("검토 대기 결제 상태가 올바르지 않습니다.");
+        }
+        this.paymentKey = confirmedPaymentKey;
+        this.status = PaymentOrderStatus.ESCROW_REVIEW;
     }
 
 }

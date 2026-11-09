@@ -41,7 +41,7 @@ public class TossPaymentClient {
                 .build();
     }
 
-    public void confirm(
+    public TossPaymentResult confirm(
             String paymentKey,
             String orderId,
             int amount
@@ -131,6 +131,11 @@ public class TossPaymentClient {
                         "PG 결제 응답이 주문 정보와 일치하지 않습니다."
                 );
             }
+
+            // An ordinary successful charge is NOT escrow protection.
+            boolean useEscrow = result.path("useEscrow").asBoolean(false);
+            String escrowKey = result.path("escrowKey").asText("");
+            return new TossPaymentResult(useEscrow, escrowKey);
 
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
