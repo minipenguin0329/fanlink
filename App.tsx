@@ -19,7 +19,7 @@ import {
   type ChatRoomResponse, type ChatMessageResponse, type TradeResponse,
   type PaymentOrderResponse, type UserResponse, type Team,
 } from './integration/fanlinkApi';
-import { clearBackendJwt, readBackendJwt, requireBackendJwt } from './integration/fanlinkSession';
+import { readBackendJwt, requireBackendJwt } from './integration/fanlinkSession';
 import { connectFanlinkChat } from './integration/fanlinkRealtime';
 import { mapBackendPostBasic } from './integration/fanlinkPostAdapter';
 
@@ -169,7 +169,7 @@ function Empty({ text = '표시할 항목이 없어요.' }: { text?: string }) {
 
 export default function App() {
   return <SafeAreaProvider><StatusBar barStyle="dark-content" /><AuthGate>{logout =>
-    <FanLink logout={() => { void clearBackendJwt().finally(() => logout()); }} />
+    <FanLink logout={logout} />
   }</AuthGate></SafeAreaProvider>;
 }
 function FanLink({ logout }: { logout: () => void }) {
@@ -187,7 +187,7 @@ function FanLink({ logout }: { logout: () => void }) {
       if (!token || !active) return;
       const user = await userApi.me(token);
       if (active) { setBackendJwt(token); setBackendUser(user); }
-    }).catch(() => { /* Expired or missing OAuth token: stay in demo mode. */ });
+    }).catch(() => { /* Profile refresh can fail independently of initial session validation. */ });
     return () => { active = false; };
   }, []);
 
