@@ -19,7 +19,7 @@ import {
   type ChatRoomResponse, type ChatMessageResponse, type TradeResponse,
   type PaymentOrderResponse, type UserResponse, type Team,
 } from './integration/fanlinkApi';
-import { clearBackendJwt, readBackendJwt, requireBackendJwt } from './integration/fanlinkSession';
+import { readBackendJwt, requireBackendJwt } from './integration/fanlinkSession';
 import { connectFanlinkChat } from './integration/fanlinkRealtime';
 import { mapBackendPostBasic } from './integration/fanlinkPostAdapter';
 
@@ -61,7 +61,7 @@ const categories: { name: Group; icon: IconName }[] = [
   { name: '티켓', icon: 'ticket' }, { name: '굿즈', icon: 'bag-handle' },
   { name: '카풀', icon: 'car-sport' }, { name: '직관메이트', icon: 'people' },
 ];
-type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment };
+type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment; backendId?: BackendPost['id']; authorId?: BackendPost['authorId']; backendStatus?: BackendPost['status'] };
 type DemoPayment = {
   title: string;
   amount: number;
@@ -169,7 +169,7 @@ function Empty({ text = '표시할 항목이 없어요.' }: { text?: string }) {
 
 export default function App() {
   return <SafeAreaProvider><StatusBar barStyle="dark-content" /><AuthGate>{logout =>
-    <FanLink logout={() => { void clearBackendJwt().finally(() => logout()); }} />
+    <FanLink logout={logout} />
   }</AuthGate></SafeAreaProvider>;
 }
 function FanLink({ logout }: { logout: () => void }) {
@@ -182,15 +182,12 @@ function FanLink({ logout }: { logout: () => void }) {
     getBackendPosts().then(posts => {
       if (!active) return;
       setServerPosts(posts);
-      setServerStatus(posts.length === 0 ? '서버에 등록된 게시물이 없습니다.' : `서버 게시물 ${posts.length}개 조회 완료`);
-    }).catch(error => {
-      if (active) setServerStatus(`조회 실패: ${String(error)}`);
-    });
+    }).catch(() => { /* Keep the preview feed when the server is unavailable. */ });
     readBackendJwt().then(async token => {
       if (!token || !active) return;
       const user = await userApi.me(token);
       if (active) { setBackendJwt(token); setBackendUser(user); }
-    }).catch(() => { /* Expired or missing OAuth token: stay in demo mode. */ });
+    }).catch(() => { /* Profile refresh can fail independently of initial session validation. */ });
     return () => { active = false; };
   }, []);
 
@@ -243,7 +240,6 @@ function FanLink({ logout }: { logout: () => void }) {
   const [recruitmentPosts, setRecruitmentPosts] = useState<Post[]>([]);
 
   const [serverPosts, setServerPosts] = useState<BackendPost[]>([]);
-  const [serverStatus, setServerStatus] = useState('불러오는 중...');
   const [backendUser, setBackendUser] = useState<UserResponse | null>(null);
   const [matchRecords, setMatchRecords] = useState<Record<number, MatchingResponse>>({});
   const [hostMatchRequests, setHostMatchRequests] = useState<Record<number, MatchingResponse[]>>({});
@@ -347,7 +343,6 @@ function FanLink({ logout }: { logout: () => void }) {
   async function refreshPosts() {
     const list = await getBackendPosts();
     setServerPosts(list);
-    setServerStatus(list.length ? `서버 게시물 ${list.length}개 조회 완료` : '서버에 등록된 게시물이 없습니다.');
   }
   async function refreshRooms(token: string) {
     setLiveRooms(await chatApi.myRooms(token));
@@ -640,9 +635,6 @@ function FanLink({ logout }: { logout: () => void }) {
   function home() {
     const orderedClubs = [clubs[fanClub], ...clubs.filter((_, index) => index !== fanClub)];
     return <>
-      {serverStatus.startsWith('조회 실패') && (
-          <Text style={s.small}>{serverStatus}</Text>
-      )}
       <View style={[s.banner, s.weather]}>
         <Icon name="partly-sunny" color="#fff49a" size={36} />
         <View style={s.flex}>
@@ -1162,7 +1154,7 @@ function FanLink({ logout }: { logout: () => void }) {
   const isTab = tabScreens.includes(screen);
   const matchingStatus = screen === 'chat' && chatPost.recruitment ? matches[chatPost.id] : undefined;
   const isComposer = screen === 'detail' || (screen === 'chat' && matchingStatus !== '거절됨' && matchingStatus !== '참여 취소');
-  const scroller = React.useRef<ScrollView>(null);
+  const scroller = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const editDraft: TradeDraft | undefined = screen === 'trade-edit' && post.trade
     && (post.group === '티켓' || post.group === '굿즈') ? {
       group: post.group, club: post.club, title: post.title, body: post.summary,

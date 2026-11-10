@@ -266,9 +266,17 @@ export const ticketPriceApi = {
 };
 
 export const userApi = {
-  me: (token: string) => request<UserResponse>('/api/users/me', {}, token),
+  me: (token: string, signal?: AbortSignal) => request<UserResponse>('/api/users/me', { signal }, token),
 };
 
 export const authApi = {
+  testLogin: (account: string, password: string, signal: AbortSignal) =>
+    request<{ token?: string; accessToken?: string }>('/api/auth/test-login', {
+      method: 'POST', body: JSON.stringify({ account, password }), signal,
+    }),
+  exchangeMobileCode: (code: string, verifier: string) =>
+    request<{ token: string }>('/api/auth/mobile/token', {
+      method: 'POST', body: JSON.stringify({ code, verifier }),
+    }),
   providers: () => request<Record<'kakao' | 'naver', string>>('/api/auth/providers'),
 };

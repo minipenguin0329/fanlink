@@ -69,4 +69,5 @@ app:
       secret-key: ${NAVER_OCR_SECRET_KEY:}
 
 server:
+  forward-headers-strategy: framework
   port: 8080
