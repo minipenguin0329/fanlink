@@ -31,7 +31,7 @@ import RecruitmentComposer, {
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 type Screen = 'home' | 'community' | 'chats' | 'my' | 'detail' | 'chat' |
   'profile' | 'security' | 'notifications' | 'settings' | 'posts' | 'comments' |
-  'history' | 'notices' | 'guide' | 'help' | 'empty' | 'trade-compose' | 'trade-edit' | 'recruit-compose' | 'joined';
+  'history' | 'notices' | 'guide' | 'help' | 'empty' | 'trade-compose' | 'trade-edit' | 'recruit-compose' | 'joined' | 'cleanpay';
 type Group = '티켓' | '굿즈' | '카풀' | '직관메이트';
 
 const blue = '#075cf1';
@@ -61,16 +61,15 @@ const categories: { name: Group; icon: IconName }[] = [
   { name: '티켓', icon: 'ticket' }, { name: '굿즈', icon: 'bag-handle' },
   { name: '카풀', icon: 'car-sport' }, { name: '직관메이트', icon: 'people' },
 ];
-type Post = {
-  id: number; group: Group; club: number; title: string; summary: string;
-  image: ImageSourcePropType; likes: number; replies: number;
-  trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string };
-  recruitment?: Recruitment;
-  /** Set ONLY for posts returned from the server, never demo samples. */
-  backendId?: number;
-  authorId?: number;
-  backendStatus?: PostStatus;
+type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment };
+type DemoPayment = {
+  title: string;
+  amount: number;
+  status: '대금 보관' | '구매 확정';
 };
+const sampleTradeAmounts: Record<number, number> = { 1: 52000, 2: 28000, 3: 24000, 4: 50000 };
+const won = (amount: number) => amount.toLocaleString('ko-KR') + '원';
+const tradeRoomKey = (name: string, id: number) => 'trade:' + id + ':' + name;
 type MatchStatus = '신청 중' | '호스트 동의' | '상호 동의' | '참여 확정' | '참여 취소' | '거절됨';
 const matchStatusNames: Record<MatchingStatus, MatchStatus> = {
   REQUESTED: '신청 중', HOST_ACCEPTED: '호스트 동의', CONFIRMED: '참여 확정',
@@ -118,7 +117,7 @@ const tabScreens: Screen[] = ['home', 'community', 'chats', 'my'];
 const tabIcons: IconName[] = ['home', 'list', 'chatbubble-ellipses', 'person'];
 const tabLabels = ['홈', '커뮤니티', '채팅', '마이'];
 const titles: Partial<Record<Screen, string>> = {
-  joined: '참여 중인 모임', profile: '내 프로필', security: '계정 및 보안', notifications: '알림 설정',
+  cleanpay: '클린페이 센터', joined: '참여 중인 모임', profile: '내 프로필', security: '계정 및 보안', notifications: '알림 설정',
   settings: '환경 설정', posts: '내 게시글', comments: '내 댓글', history: '거래내역',
   notices: '공지사항', guide: '이용가이드', help: '문의하기',
 };
@@ -304,7 +303,7 @@ function FanLink({ logout }: { logout: () => void }) {
   const [messages, setMessages] = useState<Record<string, string[]>>({});
   const [draft, setDraft] = useState('');
   const [following, setFollowing] = useState(false);
-  const [completed, setCompleted] = useState<string[]>([]);
+  const [payments, setPayments] = useState<Record<string, DemoPayment>>({});
   const [chatPost, setChatPost] = useState(samplePosts[0]);
   const [viewed, setViewed] = useState<number[]>([]);
   const [settings, setSettings] = useState<Record<string, boolean>>({ 이메일: false });
@@ -594,18 +593,10 @@ function FanLink({ logout }: { logout: () => void }) {
     const value = draft.trim();
     if (!value) return;
     if (screen === 'chat') {
-      if (activeRoomId == null) {
-        Alert.alert('데모 채팅', '실제 채팅방을 선택해야 서버에 메시지가 저장됩니다.');
-        return;
-      }
-      void performServerAction('메시지 전송 실패', async token => {
-        const saved = await chatApi.send(activeRoomId, value, token);
-        setLiveMessages(old => ({...old, [activeRoomId]: [
-          ...(old[activeRoomId] ?? []).filter(x => x.messageId !== saved.messageId), saved,
-        ]}));
-        setDraft('');
-      });
-      return;
+      const status = matches[chatPost.id];
+      if (chatPost.recruitment && (status === '거절됨' || status === '참여 취소')) return;
+      const key = chatPost.recruitment ? matchRoomKey(chatPost.id) : tradeRoomKey(chat, chatPost.id);
+      setMessages(old => ({ ...old, [key]: [...(old[key] ?? []), value] }));
     }
     Alert.alert('댓글 데모', '실제 댓글 전송은 아직 연결되지 않았습니다.');
   };
@@ -730,7 +721,7 @@ function FanLink({ logout }: { logout: () => void }) {
       </Pressable>)}
       {!backendJwt && (list.length ? list.map(([name, message, time, unread], i) => <Pressable key={name} onPress={() => openChat(name, samplePosts[[0, 3, 6, 4][index]])} style={s.chatRow}>
         <Avatar source={[images.avatar, images.samsung, images.cap, images.stadium][i % 4]} size={47} />
-        <View style={s.flex}><Text style={s.postTitle}>{name}</Text><Text style={s.small} numberOfLines={1}>{messages[name]?.at(-1) ?? message}</Text></View>
+        <View style={s.flex}><Text style={s.postTitle}>{name}</Text><Text style={s.small} numberOfLines={1}>{messages[tradeRoomKey(name, samplePosts[[0, 3, 6, 4][index]].id)]?.at(-1) ?? message}</Text></View>
         <View style={s.chatMeta}><Text style={s.tiny}>{time}</Text>{!!unread && !readRooms.includes(name) && <Text style={s.unread}>{unread}</Text>}</View>
       </Pressable>) : !matchingRooms.length && <Empty text="미리보기 채팅 내역이 없어요." />)}
       {backendJwt && !filteredLive.length && <Empty text="서버에 개설된 채팅방이 없어요." />}
@@ -743,7 +734,7 @@ function FanLink({ logout }: { logout: () => void }) {
       <View style={[s.banner, s.profileBanner]}><Image source={images.profileArt} style={s.profileArt} /><View style={s.between}><View style={[s.inline, s.flex]}><Avatar size={54} source={profileImage} /><View style={s.flex}><Text style={s.whiteTitle}>{nickname}{fanVerified ? ' ☑' : ''}</Text><Text style={s.whiteSmall}>{clubs[fanClub].name} 팬 · 매너온도 36.5°C (샘플)</Text></View></View><Pill label="프로필 편집" onPress={() => push('profile')} /></View>
         <View style={s.profileCounts}>{[['128', '게시글'], ['432', '댓글'], ['56', '거래내역'], ['18', '팔로워']].map(([number, name]) => <View key={name} style={s.stat}><Text style={s.whiteTitle}>{number}</Text><Text style={s.whiteSmall}>{name}</Text></View>)}</View>
       </View>
-      {linkPay(() => push('history'))}
+      {linkPay(() => push('cleanpay'))}
       <Section title="나의 활동"><View style={s.tileRow}>{([
         ['내 게시글', 'create-outline', () => openActivity('게시글')],
         ['내 댓글', 'chatbubble-ellipses-outline', () => openActivity('댓글')],
@@ -757,7 +748,7 @@ function FanLink({ logout }: { logout: () => void }) {
       <Section title="계정 관리"><View style={s.panel}>
         <Row icon="person-outline" label="내 프로필" value="닉네임, 소개, 관심팀 설정" onPress={() => push('profile')} />
         <Row icon="shield-checkmark-outline" label="계정 및 보안" value="비밀번호, 로그인 관리" onPress={() => push('security')} />
-        <Row icon="card-outline" label="결제수단 관리" value="카드·계좌 등록 및 관리" onPress={() => push('history')} />
+        <Row icon="card-outline" label="결제수단 관리" value="클린페이 센터" onPress={() => push('cleanpay')} />
         <Row icon="notifications-outline" label="알림 설정" value="새 댓글, 거래, 서비스 소식 알림" onPress={() => push('notifications')} />
         <Row icon="settings-outline" label="환경 설정" value="테마, 언어, 앱 설정" onPress={() => push('settings')} />
       </View></Section>
@@ -896,39 +887,94 @@ function FanLink({ logout }: { logout: () => void }) {
     </View>);
   }
 
-  function chatRoom() {
-    const post = chatPost;
-    if (activeRoomId != null) {
-      return <>
-        <View style={s.between}><Text style={s.postTitle}>서버 채팅방 #{activeRoomId}</Text><Pill label="관련 글" onPress={() => openPost(post)} /></View>
-        <Text style={s.small}>메시지는 실제 서버에 저장됩니다. 거래 상태는 결제 승인 전까지 변경되지 않습니다.</Text>
-        {(liveMessages[activeRoomId] ?? []).map(message => <View key={message.messageId}
-          style={[s.messageRow, message.senderId === backendUser?.id ? s.messageMine : s.messageTheirs]}>
-          {message.senderId !== backendUser?.id && <Avatar size={28} />}
-          <Text style={[s.bubble, message.senderId === backendUser?.id && s.bubbleMine]}>{message.content}</Text>
-        </View>)}
-        {!(liveMessages[activeRoomId] ?? []).length && <Empty text="첫 메시지를 보내보세요." />}
-      </>;
+  function tradeCard() {
+    const key = tradeRoomKey(chat, chatPost.id);
+    const payment = payments[key];
+    const price = sampleTradeAmounts[chatPost.id];
+    const fee = chatPost.group === '티켓' ? 500 : 0;
+    return <View style={[s.card, s.tradeCard]}>
+      <Pressable accessibilityRole="button" style={[s.inline, s.wrap]} onPress={() => openPost(chatPost)}>
+        <Image source={chatPost.image} style={s.thumb} resizeMode="contain" />
+        <View style={s.flex}>
+          <Text style={s.link}>안전거래 · {chatPost.group}</Text>
+          <Text style={s.postTitle}>{chatPost.title}</Text>
+        </View>
+        <Icon name="chevron-forward" size={14} />
+      </Pressable>
+      <Text style={s.small}>{payment?.status ?? (price ? '결제 대기' : '가격 정보 없음')} · 데모</Text>
+      {!!price && <Text style={s.small}>판매가 {won(price)}{fee ? ' · 안심 수수료 ' + won(fee) : ''} · 결제액 {won(price + fee)}</Text>}
+    </View>;
+  }
+
+  function tradeActions() {
+    const key = tradeRoomKey(chat, chatPost.id);
+    const payment = payments[key];
+    const price = sampleTradeAmounts[chatPost.id];
+    if (!price) return null;
+    const amount = price + (chatPost.group === '티켓' ? 500 : 0);
+    if (payment?.status === '구매 확정') {
+      return <View style={s.matchActions}>
+        <Text style={[s.small, s.shrink]}>구매 확정 완료</Text>
+        <Pill label="클린페이 보기" onPress={() => push('cleanpay')} />
+      </View>;
     }
-    const paymentKey = chat + ':' + post.id;
-    const payment = completed.includes(paymentKey);
+    return <View style={s.matchActions}>
+      <Pill label={payment ? '수령 확인 및 구매 확정' : '결제하기'} selected onPress={() => {
+        if (payment) {
+          Alert.alert('구매 확정', '상품을 수령했나요? 데모 거래를 구매 확정으로 변경합니다.', [
+            { text: '취소', style: 'cancel' },
+            { text: '구매 확정', onPress: () => setPayments(old => old[key]?.status === '대금 보관'
+              ? { ...old, [key]: { ...old[key], status: '구매 확정' } } : old) },
+          ]);
+        } else {
+          Alert.alert('데모 결제', won(amount) + ' 결제를 시연할까요?', [
+            { text: '취소', style: 'cancel' },
+            { text: '결제', onPress: () => setPayments(old => old[key] ? old : {
+              ...old, [key]: { title: chatPost.title, amount, status: '대금 보관' },
+            }) },
+          ]);
+        }
+      }} />
+    </View>;
+  }
+
+  function chatRoom() {
+    const key = tradeRoomKey(chat, chatPost.id);
+    const payment = payments[key];
+    const ticket = chatPost.group === '티켓';
     return <>
-      <View style={s.between}><View style={[s.inline, s.flex]}><Avatar /><View style={s.flex}><Text style={s.postTitle}>{chat} <Text style={s.link}>☑</Text></Text><Text style={s.tiny}>최근 접속 2분 전</Text></View></View><Pill label="거래정보" icon="card-outline" onPress={() => openPost(post)} /></View>
-      <Pressable style={[s.card, s.inline]} onPress={() => openPost(post)}><Image source={post.image} style={s.thumb} /><View style={s.flex}><Text style={s.link}>{post.group}</Text><Text style={s.postTitle}>{post.title}</Text><Text style={s.tiny}>11/8 (토) 17:00 · 대구 삼성라이온즈파크</Text></View><Icon name="chevron-forward" size={14} /></Pressable>
-      <Text style={s.dateChip}>오늘</Text>
-      {[        [false, '안녕하세요!\n티켓 아직 구매 가능할까요?'],
-        [true, '네! 아직 2연석 모두 가능합니다!'],
-        [false, '다행이네요!\n가격 그대로 52,000원 맞을까요?'],
-        [true, '네 맞습니다!\nFANLINK 링크페이로 결제하시면 돼요.\n결제 링크 보내드릴게요!'],
-      ].map(([mine, message], i) => <View key={i} style={[s.messageRow, mine ? s.messageMine : s.messageTheirs]}>{!mine && <Avatar size={28} />}<Text style={[s.bubble, mine && s.bubbleMine]}>{message}</Text><Text style={s.tiny}>오후 5:{24 + i}</Text></View>)}
-      <View style={[s.messageRow, s.messageTheirs]}><Avatar size={28} /><View style={s.paymentCard}>
-        <Text style={s.link}>Ⅼ LinkPay</Text><Text style={s.postTitle}>티켓 결제 요청 (52,000원)</Text><Text style={s.small}>{post.title}</Text>
-        <Button label="결제 데모 (실제 결제 불가)" onPress={() => Alert.alert('데모 결제', '실제 결제 승인과 무관한 미리보기 화면입니다.')} />
+      <View style={[s.inline, s.wrap]}><Avatar /><View style={s.flex}>
+        <Text style={s.postTitle}>{chat}</Text>
+        <Text style={s.tiny}>최근 접속 2분 전</Text>
       </View></View>
-      {payment && <View style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>결제 완료했습니다!</Text></View>}
-      {(messages[chat] ?? []).map((message, i) => <View key={i} style={[s.messageRow, s.messageMine]}><Text style={[s.bubble, s.bubbleMine]}>{message}</Text></View>)}
+      <Text style={s.dateChip}>오늘</Text>
+      {(chatPost.id === 1 ? [
+        '안녕하세요!\n티켓 아직 구매 가능할까요?',
+        '네! 아직 2연석 모두 가능합니다!',
+        '다행이네요!\n가격 그대로 52,000원 맞을까요?',
+        '네 맞습니다!\nFANLINK 링크페이로 결제하시면 돼요.\n결제 링크 보내드릴게요!',
+      ] : ticket ? ['안녕하세요! 티켓 아직 구매 가능할까요?', '네! FANLINK 링크페이로 결제하시면 돼요.']
+        : ['안녕하세요! 굿즈 아직 구매 가능할까요?', '네! 수령 방법을 채팅으로 맞춰요.']).map((message, i) => {
+        const mine = i % 2 === 1;
+        return <View key={i} style={[s.messageRow, mine ? s.messageMine : s.messageTheirs]}>
+          {!mine && <Avatar size={28} />}
+          <Text style={[s.bubble, mine && s.bubbleMine]}>{message}</Text>
+          <Text style={[s.tiny, s.shrink]}>오후 5:{24 + i}</Text>
+        </View>;
+      })}
+      {payment && <View style={s.card}>
+        <Text style={s.postTitle}>LinkPay · {payment.status}</Text>
+        <Text style={s.small}>{payment.status === '구매 확정' ? '데모 구매 확정을 완료했어요.'
+          : ticket ? '외부 예매 서비스에서 스마트티켓을 받은 뒤 구매를 확정해 주세요.'
+            : '굿즈를 받은 뒤 구매를 확정해 주세요.'}</Text>
+      </View>}
+      {(messages[key] ?? []).map((message, i) =>
+        <View key={i} style={[s.messageRow, s.messageMine]}>
+          <Text style={[s.bubble, s.bubbleMine]}>{message}</Text>
+        </View>)}
     </>;
   }
+
   function profile() {
     return <>
       <Text style={s.title}>내 프로필</Text>
@@ -969,7 +1015,7 @@ function FanLink({ logout }: { logout: () => void }) {
         <Row icon="shield-checkmark-outline" label="2단계 인증 (OTP)" hint="로그인 시 추가 인증으로 계정을 보호해요." toggle={toggle('otp')} />
         <Row icon="phone-portrait-outline" label="로그인 기기 관리" hint="내 계정으로 로그인한 기기를 확인해요." onPress={() => info('로그인 기기 관리', '현재 기기에서 접속 중이에요.')} />
       </View></Section>
-      <Section title="결제 및 연동"><View style={s.panel}><Row icon="card-outline" label="결제수단 관리" hint="카드, 계좌 등 결제수단 등록 및 관리" onPress={() => push('history')} /><Row icon="link-outline" label="연동 계정 관리" hint="SNS 계정 연동을 관리할 수 있어요." onPress={() => info('연동 계정 관리')} /></View></Section>
+      <Section title="결제 및 연동"><View style={s.panel}><Row icon="card-outline" label="결제수단 관리" hint="클린페이에서 결제·정산 계좌 확인" onPress={() => push('cleanpay')} /><Row icon="link-outline" label="연동 계정 관리" hint="SNS 계정 연동을 관리할 수 있어요." onPress={() => info('연동 계정 관리')} /></View></Section>
       <Section title="계정 관리"><View style={s.panel}><Row icon="download-outline" label="데이터 다운로드" hint="내 활동 데이터를 확인해요." onPress={() => info('데이터 다운로드')} /><Row icon="log-out-outline" label="로그아웃" onPress={logout} /><Row icon="person-remove-outline" label="계정 탈퇴" danger onPress={() => info('계정 탈퇴')} /></View></Section>
     </>;
   }
@@ -1021,6 +1067,30 @@ function FanLink({ logout }: { logout: () => void }) {
       </View>}
     </>;
   }
+  function paymentRows() {
+    const rows = Object.entries(payments).reverse();
+    return rows.length ? rows.map(([key, item]) => <View key={key} style={[s.card, s.tradeLedger]}>
+      <View style={s.flex}><Text style={s.rowTitle}>{item.title}</Text><Text style={s.small}>{item.status}</Text></View>
+      <Text style={[s.link, s.shrink]}>−{won(item.amount)}</Text>
+    </View>) : <Empty text="아직 이 앱에서 진행한 데모 거래가 없어요." />;
+  }
+
+  function cleanPay() {
+    const held = Object.values(payments).reduce((sum, item) => item.status === '대금 보관' ? sum + item.amount : sum, 0);
+    return <>
+      <View style={[s.banner, s.cleanPayBanner]}>
+        <Text style={s.whiteTitle}>LinkPay · 안심결제</Text>
+        <Text style={s.whiteSmall}>임시 보관 잔액 (샘플 포함)</Text>
+        <Text style={s.whiteTitle}>{won(150000 + held)}</Text>
+        <Text style={s.whiteSmall}>정산 예정 40,000원 · 출금 가능 110,000원 (샘플)</Text>
+      </View>
+      <Section title="계좌 관리"><View style={s.panel}>
+        <Row icon="card-outline" label="정산 계좌 (샘플)" hint="카카오뱅크 3333-**-****567" />
+      </View></Section>
+      <Section title="이번 실행의 거래" action={stack.at(-2) === 'history' ? back : () => push('history')}>{paymentRows()}</Section>
+    </>;
+  }
+
   function history() {
     if (backendJwt) return <>
       <Section title="내 거래 내역">
@@ -1042,7 +1112,9 @@ function FanLink({ logout }: { logout: () => void }) {
     ];
     return <>
       <Pills items={['전체', '구매', '판매', '정산(입금)', '충전/출금']} value={historyFilter} onChange={setHistoryFilter} />
-      {linkPay(() => info('LinkPay', '실제 결제·정산 잔액 조회는 아직 연동되지 않았습니다.'))}
+      {linkPay(() => push('cleanpay'))}
+      {(historyFilter === '전체' || historyFilter === '구매') && Object.keys(payments).length > 0
+        && <Section title="이번 실행의 거래">{paymentRows()}</Section>}
       <View style={[s.panel, s.between]}><IconButton name="chevron-back" label="이전 달" onPress={() => setMonth(Math.max(1, month - 1))} /><Text style={s.postTitle}>2025년 {month}월 ⌄</Text><IconButton name="chevron-forward" label="다음 달" onPress={() => setMonth(Math.min(12, month + 1))} /></View>
       <Section title={month + '월 거래 요약'}><View style={[s.panel, s.stats]}>{[['구매', '-102,000원'], ['판매', '+85,000원'], ['정산(입금)', '+85,000원']].map(([label, value]) => <View key={label} style={s.stat}><Text style={s.small}>{label}</Text><Text style={s.link}>{month === 11 ? value : '0원'}</Text></View>)}</View></Section>
       <Section title="거래 내역">{month === 11 ? rows.filter(item => historyFilter === '전체' || item.kind === historyFilter).map(item => <Pressable key={item.label} style={[s.card, s.inline]} onPress={() => info(item.kind, item.label + '\n' + item.amount)}>{item.image ? <Image source={item.image} style={s.thumb} /> : <View style={s.squareIcon}><Icon name="wallet-outline" color={blue} /></View>}<View style={s.flex}><Text style={s.link}>{item.kind}</Text><Text style={s.rowTitle}>{item.label}</Text><Text style={s.tiny}>2025.11.08 17:02</Text></View><View><Text style={s.link}>{item.amount}</Text><Text style={s.complete}>샘플 표시</Text></View></Pressable>) : <Empty text="이 달의 거래 내역이 없어요." />}</Section>
@@ -1111,7 +1183,7 @@ function FanLink({ logout }: { logout: () => void }) {
   ) : screen === 'home' ? home() : screen === 'community' ? community() : screen === 'chats' ? chats() :
     screen === 'my' ? my() : screen === 'detail' ? detail() : screen === 'chat' ? (matchingStatus ? matchingChat() : chatRoom()) :
     screen === 'profile' ? profile() : screen === 'security' ? security() : screen === 'notifications' ? notifications() :
-    screen === 'settings' ? preferences() : screen === 'history' ? history() :
+    screen === 'settings' ? preferences() : screen === 'cleanpay' ? cleanPay() : screen === 'history' ? history() :
     screen === 'posts' || screen === 'comments' ? activities() :
     screen === 'notices' || screen === 'guide' || screen === 'help' ? support() : null;
 
@@ -1120,7 +1192,9 @@ function FanLink({ logout }: { logout: () => void }) {
       <RecruitmentCard recruitment={chatPost.recruitment} compact={!compactChat} />
     </Pressable>
   ) : null;
-  const matchingActions = matchingStatus ? matchActions(matchingStatus) : null;
+  const chatPin = pinnedMatch ?? (screen === 'chat' && !chatPost.recruitment ? tradeCard() : null);
+  const chatActions = matchingStatus ? matchActions(matchingStatus)
+    : screen === 'chat' && !chatPost.recruitment ? tradeActions() : null;
 
   return <SafeAreaView style={[s.safe, (isTab || screen === 'empty') && { backgroundColor: '#fff' }]}>
     <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -1134,16 +1208,16 @@ function FanLink({ logout }: { logout: () => void }) {
         </View>}
       </View>
       {(['chat', 'posts', 'comments', 'history'] as Screen[]).includes(screen) && <Image source={images.backdrop} style={s.backdrop} />}
-      {!compactChat && pinnedMatch && <View style={s.pinnedMatch}>{pinnedMatch}</View>}
+      {!compactChat && chatPin && <View style={s.pinnedMatch}>{chatPin}</View>}
       <ScrollView key={screen} ref={scroller} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
         style={s.flex} contentContainerStyle={s.content}>
         {!!titles[screen] && screen !== 'profile' && <Text style={s.title}>{titles[screen]}</Text>}
         {!!intro[screen] && <Text style={s.intro}>{intro[screen]}</Text>}
-        {compactChat && pinnedMatch}
+        {compactChat && chatPin}
         {content}
-        {compactChat && matchingActions}
+        {compactChat && chatActions}
       </ScrollView>
-      {!compactChat && matchingActions}
+      {!compactChat && chatActions}
       {isComposer && <View style={s.composer}>
         <IconButton name={screen === 'chat' ? 'add-circle-outline' : 'image-outline'} label="첨부 메뉴" onPress={() => select('첨부', ['사진', '파일'])} />
         <TextInput style={[s.input, s.flex]} placeholder={screen === 'chat' ? '메시지를 입력하세요...' : '댓글을 입력하세요...'} value={draft} onChangeText={setDraft} onSubmitEditing={() => { send(); setTimeout(() => scroller.current?.scrollToEnd(), 80); }} returnKeyType="send" />
@@ -1239,7 +1313,9 @@ const s = StyleSheet.create({
   messageTheirs: { alignSelf: 'flex-start' },
   bubble: { flexShrink: 1, maxWidth: '76%', paddingHorizontal: 11, paddingVertical: 8, color: ink, backgroundColor: '#e9edf4', fontSize: 12, lineHeight: 18, borderRadius: 13 },
   bubbleMine: { color: 'white', backgroundColor: blue },
-  paymentCard: { flexShrink: 1, maxWidth: '81%', backgroundColor: '#eaf3ff', padding: 10, borderRadius: 12, gap: 4 },
+  tradeCard: { backgroundColor: '#eef5ff', gap: 6 },
+  tradeLedger: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  cleanPayBanner: { flexDirection: 'column', alignItems: 'flex-start', backgroundColor: '#0647c5' },
   pinnedMatch: { paddingHorizontal: 16, paddingBottom: 8 },
   matchActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#fff' },
   composer: { flexDirection: 'row', alignItems: 'center', gap: 7, padding: 8, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#edf0f5' },
