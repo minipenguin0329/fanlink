@@ -9,6 +9,37 @@ services:
       - "5432:5432"
     volumes:
       - fanlink-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fanlink"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fanlink
+      SPRING_DATASOURCE_USERNAME: fanlink
+      SPRING_DATASOURCE_PASSWORD: fanlink
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env before starting the app service}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID:-}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      NAVER_OCR_INVOKE_URL: ${NAVER_OCR_INVOKE_URL:-}
+      NAVER_OCR_SECRET_KEY: ${NAVER_OCR_SECRET_KEY:-}
+      TOSS_TEST_SECRET_KEY: ${TOSS_TEST_SECRET_KEY:-}
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "8080:8080"
+    volumes:
+      - fanlink-uploads:/app/uploads
+    restart: unless-stopped
 
 volumes:
   fanlink-pg-data:
+  fanlink-uploads:
