@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fanlink
+      POSTGRES_USER: fanlink
+      POSTGRES_PASSWORD: fanlink
+    ports:
+      - "5432:5432"
+    volumes:
+      - fanlink-pg-data:/var/lib/postgresql/data
+
+volumes:
+  fanlink-pg-data:

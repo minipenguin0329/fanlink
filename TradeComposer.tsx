@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { ComposerChoices, composerStyles } from './ComposerUI';
+import { composerStyles } from './ComposerUI';
 
 export type TradeGroup = '티켓' | '굿즈';
 export type TradeDraft = {
@@ -15,21 +15,19 @@ export type TradeDraft = {
   referencePrice: number;
 };
 
-type Scenario = 'success' | 'unreadable' | 'mismatch';
-type Analysis = { status: 'idle' | 'pending' | 'unreadable' | 'mismatch' }
+type Analysis = { status: 'idle' | 'pending' | 'unreadable' }
   | { status: 'ready'; referencePrice: number };
-
-const demoPrices = { 티켓: 26000, 굿즈: 30000 };
 const formatWon = (price: number) => price.toLocaleString('ko-KR') + '원';
 
 type Props = {
   initialDraft?: TradeDraft;
   initialGroup: TradeGroup;
   initialClub: number;
-  onPublish: (draft: TradeDraft) => void;
+  onPublish: (draft: TradeDraft) => void | Promise<void>;
+  onVerifyPrice: (imageUri: string, declaredPrice: number) => Promise<number>;
 };
 
-export default function TradeComposer({ initialGroup, initialClub, initialDraft, onPublish }: Props) {
+export default function TradeComposer({ initialGroup, initialClub, initialDraft, onPublish, onVerifyPrice }: Props) {
   const group = initialDraft?.group ?? initialGroup;
   const club = initialDraft?.club ?? initialClub;
   const [title, setTitle] = useState(initialDraft?.title ?? '');
@@ -37,13 +35,14 @@ export default function TradeComposer({ initialGroup, initialClub, initialDraft,
   const [price, setPrice] = useState(initialDraft ? String(initialDraft.price) : '');
   const [imageUri, setImageUri] = useState(initialDraft?.imageUri);
   const [imageRatio, setImageRatio] = useState(1.7);
-  const [scenario, setScenario] = useState<Scenario>('success');
   const [analysis, setAnalysis] = useState<Analysis>(initialDraft
     ? { status: 'ready', referencePrice: initialDraft.referencePrice }
     : { status: 'idle' });
   const [imageError, setImageError] = useState('');
   const [picking, setPicking] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState('');
   const pickerPending = useRef(false);
   const published = useRef(false);
   const amount = Number(price);
@@ -51,20 +50,20 @@ export default function TradeComposer({ initialGroup, initialClub, initialDraft,
   const priceTooHigh = validPrice && analysis.status === 'ready' && amount > analysis.referencePrice;
   const analyzing = analysis.status === 'pending';
 
-  useEffect(() => {
-    if (!analyzing) return;
-    const timer = setTimeout(() => {
-      setAnalysis(scenario === 'success'
-        ? { status: 'ready', referencePrice: demoPrices[group] }
-        : { status: scenario });
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [analyzing, group, scenario]);
-
-  function changeScenario(next: Scenario) {
-    if (next === scenario) return;
-    setScenario(next);
-    setAnalysis({ status: 'idle' });
+  async function analyzePrice() {
+    if (!imageUri || !validPrice || analyzing) {
+      setSubmitted(true);
+      return;
+    }
+    setAnalysis({status: 'pending'});
+    setImageError('');
+    try {
+      const verifiedFacePrice = await onVerifyPrice(imageUri, amount);
+      setAnalysis({status: 'ready', referencePrice: verifiedFacePrice});
+    } catch (error) {
+      setAnalysis({status: 'unreadable'});
+      setImageError(error instanceof Error ? error.message : 'OCR 검증에 실패했습니다.');
+    }
   }
 
   function changeImage(uri?: string) {
@@ -90,12 +89,22 @@ export default function TradeComposer({ initialGroup, initialClub, initialDraft,
     }
   }
 
-  function publish() {
-    if (pickerPending.current || published.current) return;
+  async function publish() {
+    if (pickerPending.current || published.current || publishing) return;
     setSubmitted(true);
-    if (!title.trim() || !body.trim() || !validPrice || !imageUri || analysis.status !== 'ready' || priceTooHigh) return;
+    if (!title.trim() || !body.trim() || !validPrice || !imageUri || (group === '티켓' && (analysis.status !== 'ready' || priceTooHigh))) return;
     published.current = true;
-    onPublish({ group, club, title: title.trim(), body: body.trim(), price: amount, imageUri, referencePrice: analysis.referencePrice });
+    setPublishing(true);
+    setPublishError('');
+    try {
+      await onPublish({ group, club, title: title.trim(), body: body.trim(), price: amount, imageUri,
+        referencePrice: analysis.status === 'ready' ? analysis.referencePrice : amount });
+    } catch (error) {
+      published.current = false;
+      setPublishError(error instanceof Error ? error.message : '등록에 실패했습니다.');
+    } finally {
+      setPublishing(false);
+    }
   }
 
   return (
@@ -140,7 +149,7 @@ export default function TradeComposer({ initialGroup, initialClub, initialDraft,
         {submitted && !title.trim() && <Text style={composerStyles.error}>제목을 입력해 주세요.</Text>}
 
         <Text style={composerStyles.label}>판매 희망가</Text>
-        <TextInput accessibilityLabel="판매 희망가" style={composerStyles.input} value={price} onChangeText={setPrice}
+        <TextInput accessibilityLabel="판매 희망가" style={composerStyles.input} value={price} onChangeText={next => {setPrice(next);setAnalysis({status: 'idle'});}}
           keyboardType="number-pad" placeholder="원 단위로 입력" maxLength={12} />
         {submitted && !validPrice && <Text style={composerStyles.error}>희망가를 1원 이상의 숫자로 입력해 주세요.</Text>}
 
@@ -151,35 +160,28 @@ export default function TradeComposer({ initialGroup, initialClub, initialDraft,
 
       </View>
 
-      <View style={[composerStyles.panel, styles.analysis]}>
-        <Text style={composerStyles.label}>OCR 가격 분석 · 데모</Text>
-        <Text style={composerStyles.hint}>사진을 분석하는 대신 아래 테스트 결과를 사용해요.</Text>
-        {group === '굿즈' && <Text style={composerStyles.hint}>굿즈는 데모 정가를 사용해요. 중고 굿즈 검증 기준은 별도 정책이 필요해요.</Text>}
-        <ComposerChoices<Scenario> options={[
-          { label: '정가 인식', value: 'success' },
-          { label: '인식 실패', value: 'unreadable' },
-          { label: '정보 불일치', value: 'mismatch' },
-        ]} value={scenario} onChange={changeScenario} />
-        <Pressable accessibilityRole="button" disabled={!imageUri || picking || analyzing}
-          style={[composerStyles.choice, (!imageUri || picking || analyzing) && styles.disabled]}
-          onPress={() => setAnalysis({ status: 'pending' })}>
+      {group === '티켓' && <View style={[composerStyles.panel, styles.analysis]}>
+        <Text style={composerStyles.label}>티켓 정가 OCR · 실제 서버 검증</Text>
+        <Text style={composerStyles.hint}>가격과 구매 캡처를 입력한 뒤 서버에서 정가를 검증하세요. 검증 전에는 등록할 수 없습니다.</Text>
+        <Pressable accessibilityRole="button" disabled={!imageUri || !validPrice || picking || analyzing}
+          style={[composerStyles.choice, (!imageUri || !validPrice || picking || analyzing) && styles.disabled]}
+          onPress={() => {void analyzePrice();}}>
           {analyzing && <ActivityIndicator color="#075cf1" />}
-          <Text style={[composerStyles.link, composerStyles.choiceText]}>{analyzing ? '가격 분석 중…' : '가격 분석하기'}</Text>
+          <Text style={[composerStyles.link, composerStyles.choiceText]}>{analyzing ? '서버 OCR 검사 중…' : '정가 검증하기'}</Text>
         </Pressable>
         {analysis.status === 'ready' && <>
-          <Text style={composerStyles.label}>확인한 데모 정가 · {formatWon(analysis.referencePrice)}</Text>
-          {validPrice && (priceTooHigh
-            ? <Text accessibilityRole="alert" style={composerStyles.error}>정가를 초과해요. {formatWon(analysis.referencePrice)} 이하로 입력해 주세요.</Text>
-            : <Text style={styles.success}>가격 검증을 통과했어요.</Text>)}
+          <Text style={composerStyles.label}>OCR 확인 정가 · {formatWon(analysis.referencePrice)}</Text>
+          {priceTooHigh ? <Text accessibilityRole="alert" style={composerStyles.error}>정가를 초과합니다.</Text>
+            : <Text style={styles.success}>서버에서 정가 검증이 완료되었습니다.</Text>}
         </>}
-        {analysis.status === 'unreadable' && <Text accessibilityRole="alert" style={composerStyles.error}>가격을 인식하지 못했어요. 사진을 교체하거나 분석을 다시 시도해 주세요.</Text>}
-        {analysis.status === 'mismatch' && <Text accessibilityRole="alert" style={composerStyles.error}>가격 정보가 일치하지 않아요. 사진을 확인하고 다시 분석해 주세요.</Text>}
-        {submitted && !!imageUri && analysis.status === 'idle' && <Text accessibilityRole="alert" style={composerStyles.error}>등록 전에 가격을 분석해 주세요.</Text>}
-      </View>
+        {analysis.status === 'unreadable' && <Text accessibilityRole="alert" style={composerStyles.error}>정가 인증을 완료하지 못했습니다. 캡처를 다시 확인해주세요.</Text>}
+        {submitted && analysis.status === 'idle' && <Text accessibilityRole="alert" style={composerStyles.error}>먼저 서버 OCR 정가 검증을 진행해주세요.</Text>}
+      </View>}
+      {!!publishError && <Text accessibilityRole="alert" style={composerStyles.error}>{publishError}</Text>}
 
-      <Pressable accessibilityRole="button" disabled={picking || analyzing || priceTooHigh} onPress={publish}
-        style={[composerStyles.publish, (picking || analyzing || priceTooHigh) && styles.disabled]}>
-        <Text style={composerStyles.publishText}>{initialDraft ? '수정 저장' : '등록하기'}</Text>
+      <Pressable accessibilityRole="button" disabled={picking || analyzing || publishing || priceTooHigh} onPress={() => {void publish();}}
+        style={[composerStyles.publish, (picking || analyzing || publishing || priceTooHigh) && styles.disabled]}>
+        <Text style={composerStyles.publishText}>{publishing ? '서버에 저장 중…' : initialDraft ? '수정 저장' : '등록하기'}</Text>
       </Pressable>
     </View>
   );
