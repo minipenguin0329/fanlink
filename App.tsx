@@ -182,10 +182,7 @@ function FanLink({ logout }: { logout: () => void }) {
     getBackendPosts().then(posts => {
       if (!active) return;
       setServerPosts(posts);
-      setServerStatus(posts.length === 0 ? '서버에 등록된 게시물이 없습니다.' : `서버 게시물 ${posts.length}개 조회 완료`);
-    }).catch(error => {
-      if (active) setServerStatus(`조회 실패: ${String(error)}`);
-    });
+    }).catch(() => { /* Keep the preview feed when the server is unavailable. */ });
     readBackendJwt().then(async token => {
       if (!token || !active) return;
       const user = await userApi.me(token);
@@ -243,7 +240,6 @@ function FanLink({ logout }: { logout: () => void }) {
   const [recruitmentPosts, setRecruitmentPosts] = useState<Post[]>([]);
 
   const [serverPosts, setServerPosts] = useState<BackendPost[]>([]);
-  const [serverStatus, setServerStatus] = useState('불러오는 중...');
   const [backendUser, setBackendUser] = useState<UserResponse | null>(null);
   const [matchRecords, setMatchRecords] = useState<Record<number, MatchingResponse>>({});
   const [hostMatchRequests, setHostMatchRequests] = useState<Record<number, MatchingResponse[]>>({});
@@ -347,7 +343,6 @@ function FanLink({ logout }: { logout: () => void }) {
   async function refreshPosts() {
     const list = await getBackendPosts();
     setServerPosts(list);
-    setServerStatus(list.length ? `서버 게시물 ${list.length}개 조회 완료` : '서버에 등록된 게시물이 없습니다.');
   }
   async function refreshRooms(token: string) {
     setLiveRooms(await chatApi.myRooms(token));
@@ -640,9 +635,6 @@ function FanLink({ logout }: { logout: () => void }) {
   function home() {
     const orderedClubs = [clubs[fanClub], ...clubs.filter((_, index) => index !== fanClub)];
     return <>
-      {serverStatus.startsWith('조회 실패') && (
-          <Text style={s.small}>{serverStatus}</Text>
-      )}
       <View style={[s.banner, s.weather]}>
         <Icon name="partly-sunny" color="#fff49a" size={36} />
         <View style={s.flex}>
