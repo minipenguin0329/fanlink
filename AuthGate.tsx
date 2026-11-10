@@ -217,7 +217,6 @@ export default function AuthGate({ children }: { children: (logout: () => void) 
         <Text style={styles.brand}>FANLINK</Text>
         <Text style={styles.loginCopy}>티켓 예매부터 팬 활동까지,{'\n'}FANLINK에서 한 번에</Text>
         <View style={styles.loginActions}>
-          <Text accessibilityRole="header" style={styles.testLoginTitle}>테스트 계정 로그인</Text>
           <TextInput accessibilityLabel="아이디" placeholder="아이디" placeholderTextColor="#535b6d"
             style={styles.loginInput} value={account} onChangeText={setAccount} editable={!signingIn}
             autoCapitalize="none" autoCorrect={false} autoComplete="username" />
@@ -225,7 +224,7 @@ export default function AuthGate({ children }: { children: (logout: () => void) 
             style={styles.loginInput} value={password} onChangeText={setPassword} editable={!signingIn}
             autoCapitalize="none" autoCorrect={false} autoComplete="current-password" secureTextEntry
             returnKeyType="go" onSubmitEditing={() => void signInWithTestAccount()} />
-          <Action label={testLoginPending ? '로그인 중…' : '테스트 계정으로 로그인'}
+          <Action label={testLoginPending ? '로그인 중…' : '로그인'}
             disabled={signingIn} onPress={() => void signInWithTestAccount()} />
           <Action label={provider === 'kakao' ? '카카오 로그인 중…' : '●   카카오로 로그인'}
             color="#ffe500" textColor="#151009" disabled={signingIn} onPress={() => void signIn('kakao')} />
@@ -249,7 +248,6 @@ const styles = StyleSheet.create({
   loginContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28, paddingTop: 16, paddingBottom: 64 },
   loginCopy: { marginTop: 8, textAlign: 'center', lineHeight: 21, color: '#535b6d', fontSize: 14 },
   loginActions: { marginTop: 28, width: '100%', maxWidth: 400, gap: 10 },
-  testLoginTitle: { color: '#0b1737', fontSize: 16, fontWeight: '800' },
   loginInput: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 11,
     borderWidth: 1, borderColor: '#c8d2e2', backgroundColor: '#fff', color: '#0b1737', fontSize: 16 },
   hint: { color: '#535b6d', fontSize: 14, lineHeight: 21 },
