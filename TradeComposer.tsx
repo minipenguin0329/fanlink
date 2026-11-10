@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from './Icons';
 import * as ImagePicker from 'expo-image-picker';
 import { composerStyles } from './ComposerUI';
 

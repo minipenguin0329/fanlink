@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from './Icons';
 import { composerStyles } from './ComposerUI';
 
 export type RecruitmentGroup = '직관메이트' | '카풀';

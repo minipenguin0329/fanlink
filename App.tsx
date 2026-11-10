@@ -3,7 +3,7 @@ import {
   Alert, BackHandler, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from './Icons';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
