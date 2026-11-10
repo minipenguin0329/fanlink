@@ -61,7 +61,7 @@ const categories: { name: Group; icon: IconName }[] = [
   { name: '티켓', icon: 'ticket' }, { name: '굿즈', icon: 'bag-handle' },
   { name: '카풀', icon: 'car-sport' }, { name: '직관메이트', icon: 'people' },
 ];
-type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment };
+type Post = { id: number; group: Group; club: number; title: string; summary: string; image: ImageSourcePropType; likes: number; replies: number; trade?: Pick<TradeDraft, 'price' | 'referencePrice' | 'imageUri'> & { author: string }; recruitment?: Recruitment; backendId?: BackendPost['id']; authorId?: BackendPost['authorId']; backendStatus?: BackendPost['status'] };
 type DemoPayment = {
   title: string;
   amount: number;
@@ -1162,7 +1162,7 @@ function FanLink({ logout }: { logout: () => void }) {
   const isTab = tabScreens.includes(screen);
   const matchingStatus = screen === 'chat' && chatPost.recruitment ? matches[chatPost.id] : undefined;
   const isComposer = screen === 'detail' || (screen === 'chat' && matchingStatus !== '거절됨' && matchingStatus !== '참여 취소');
-  const scroller = React.useRef<ScrollView>(null);
+  const scroller = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const editDraft: TradeDraft | undefined = screen === 'trade-edit' && post.trade
     && (post.group === '티켓' || post.group === '굿즈') ? {
       group: post.group, club: post.club, title: post.title, body: post.summary,

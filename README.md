@@ -1,6 +1,6 @@
 # FANLINK UI
 
-첨부된 FANLINK 화면 디자인을 TypeScript, React Native, Expo SDK 57로 구현한 모바일 UI 프로토타입입니다.
+첨부된 FANLINK 화면 디자인을 TypeScript, React Native, Expo SDK 58로 구현한 모바일 UI 프로토타입입니다.
 
 ## 실행
 
@@ -12,7 +12,7 @@ npx expo start
 ```
 
 - Android 에뮬레이터를 켜고 터미널에서 `a`를 눌러 실행할 수 있습니다.
-- 실기기에서는 SDK 57와 호환되는 Expo Go에서 QR 코드를 엽니다. 컴퓨터와 휴대폰은 같은 네트워크에 연결하세요.
+- 실기기에서는 SDK 58과 호환되는 Expo Go에서 QR 코드를 엽니다. 컴퓨터와 휴대폰은 같은 네트워크에 연결하세요.
 - 타입 검사는 `npm run typecheck`로 실행합니다.
 
 ## 화면과 동작
